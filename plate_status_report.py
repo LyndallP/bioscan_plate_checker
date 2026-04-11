@@ -2,18 +2,17 @@
 plate_status_report.py  —  MAIN ENTRY POINT
 
 Builds a master plate status table joining:
-  - ToL Portal    : all submitted plates, submit date, partner, BOLD status
+  - Portal dump   : all submitted plates, submit date, partner, BOLD status
   - mBRAVE        : which batches each plate was sequenced in
   - QC            : QC results per plate
-  - BOLD          : bold_nuc field from portal (per-plate)
 
 Controls (CONTROL_NEG*, CONTROL_POS*, CONTROL_*) are excluded throughout.
 
 Usage:
-    python plate_status_report.py --partner ALL
-    python plate_status_report.py --partner BGEP
-    python plate_status_report.py --partner ALL --skip-portal
-    python plate_status_report.py --partner ALL --missing-only
+    python3 plate_status_report.py --partner ALL
+    python3 plate_status_report.py --partner BGEP
+    python3 plate_status_report.py --partner ALL --skip-portal
+    python3 plate_status_report.py --partner ALL --missing-only
 """
 
 import argparse
@@ -24,12 +23,12 @@ import pandas as pd
 import config
 from mbrave_checker import build_mbrave_plate_index, summarise_mbrave
 from qc_checker import build_qc_plate_index, summarise_qc
+from utils import matches_partner
 
 
 # ── Control filtering ─────────────────────────────────────────────────────────
 
 def is_control(plate_id):
-    """Return True if plate_id is a control entry, not a real plate."""
     if plate_id is None:
         return True
     pid = str(plate_id).upper()
@@ -40,24 +39,13 @@ def is_control(plate_id):
 
 
 def filter_controls(plate_dict):
-    """Remove control entries from a plate dict."""
     return {k: v for k, v in plate_dict.items() if not is_control(k)}
 
 
 # ── Main table builder ────────────────────────────────────────────────────────
 
 def build_master_table(partner='ALL', skip_portal=False, verbose=False):
-    """
-    Build master plate status DataFrame.
 
-    Column order mirrors the pipeline stages:
-        plate_id | partner | submit_date |
-        portal_status | portal_n_wells |
-        mbrave_status | mbrave_batches | n_sequencings |
-        qc_status | qc_batches | best_qc_result |
-        bold_status |
-        pipeline_stage | missing_at
-    """
     os.makedirs(config.RESULTS_DIR, exist_ok=True)
 
     # ── 1. mBRAVE ─────────────────────────────────────────────────────────────
@@ -79,103 +67,75 @@ def build_master_table(partner='ALL', skip_portal=False, verbose=False):
     summarise_qc(plate_qc_summary, batches_missing_qc)
 
     # ── 3. Portal ─────────────────────────────────────────────────────────────
-    portal_plates_df = pd.DataFrame()
+    portal_index = {}
 
     if not skip_portal:
         print("\n" + "=" * 60)
-        print("Step 3: Querying ToL Portal...")
+        print("Step 3: Loading portal plate summary...")
         print("=" * 60)
         try:
             from read_portal_dump import load_portal_plate_summary
-
-            # Strategy: query portal for all plates in our mBRAVE+QC union
-            # This is faster than pulling everything from portal
-            all_known_plates = (set(plate_to_mbrave_batches.keys()) |
-                                set(plate_qc_summary.keys()))
-            all_known_plates = {p for p in all_known_plates if not is_control(p)}
-
             portal_plates_df = load_portal_plate_summary(config.PORTAL_PLATES_CSV)
-
             if not portal_plates_df.empty:
                 print(f"  Portal: {len(portal_plates_df)} plates loaded from dump")
-                print(f"  BOLD uploaded: {portal_plates_df["bold_uploaded"].sum()} plates")
-                      f"{portal_plates_df['bold_uploaded'].sum()} plates")
+                print(f"  BOLD uploaded: {portal_plates_df['bold_uploaded'].sum()} plates")
+                portal_index = portal_plates_df.set_index('plate_id').to_dict('index')
         except Exception as e:
-            print(f"  ERROR querying portal: {e}")
-            import traceback
-            traceback.print_exc()
+            print(f"  ERROR loading portal dump: {e}")
+            print(f"  Run: python3 read_portal_dump.py")
     else:
-        print("\nStep 3: Portal query SKIPPED (--skip-portal flag)")
+        print("\nStep 3: Portal SKIPPED (--skip-portal flag)")
 
-    # ── 4. Build master table ─────────────────────────────────────────────────
-    # Start from portal plates as ground truth (if available),
-    # otherwise union of mBRAVE + QC
-    if not portal_plates_df.empty:
-        # Portal is ground truth for submitted plates
-        portal_index = portal_plates_df.set_index('plate_id').to_dict('index')
-        # Union: portal + anything in mBRAVE/QC not on portal
-        all_plates = sorted(
-            set(portal_index.keys()) |
-            set(plate_to_mbrave_batches.keys()) |
-            set(plate_qc_summary.keys())
-        )
-    else:
-        portal_index = {}
-        all_plates = sorted(
-            set(plate_to_mbrave_batches.keys()) |
-            set(plate_qc_summary.keys())
-        )
-
-    # Filter controls from final plate list
+    # ── 4. Union all plates ───────────────────────────────────────────────────
+    all_plates = sorted(
+        set(portal_index.keys()) |
+        set(plate_to_mbrave_batches.keys()) |
+        set(plate_qc_summary.keys())
+    )
     all_plates = [p for p in all_plates if not is_control(p)]
 
-    # Apply partner filter if needed
     if partner and partner.upper() != 'ALL':
-        from utils import matches_partner
         all_plates = [p for p in all_plates if matches_partner(p, partner)]
 
     print(f"\nTotal unique plates (controls excluded): {len(all_plates)}")
 
+    # ── 5. Build rows ─────────────────────────────────────────────────────────
     rows = []
     for plate_id in all_plates:
         mbrave_batches = plate_to_mbrave_batches.get(plate_id, [])
         qc_info        = plate_qc_summary.get(plate_id, None)
         portal_info    = portal_index.get(plate_id, None)
 
-        # Portal fields
         if portal_info:
-            portal_status   = 'FOUND'
-            partner_code    = portal_info.get('partner')
-            submit_date     = portal_info.get('submit_date')
-            bold_status     = 'HAS_DATA' if portal_info.get('bold_uploaded') else 'NO_DATA'
-            n_wells_portal  = portal_info.get('n_wells_portal', 0)
+            portal_status  = 'FOUND'
+            partner_code   = portal_info.get('partner')
+            submit_date    = portal_info.get('submit_date')
+            bold_status    = 'HAS_DATA' if portal_info.get('bold_uploaded') else 'NO_DATA'
+            n_wells_portal = portal_info.get('n_wells_portal', 0)
         elif skip_portal:
-            portal_status   = 'SKIPPED'
-            partner_code    = None
-            submit_date     = None
-            bold_status     = 'UNKNOWN'
-            n_wells_portal  = None
+            portal_status  = 'SKIPPED'
+            partner_code   = None
+            submit_date    = None
+            bold_status    = 'UNKNOWN'
+            n_wells_portal = None
         else:
-            portal_status   = 'MISSING'
-            partner_code    = None
-            submit_date     = None
-            bold_status     = 'UNKNOWN'
-            n_wells_portal  = 0
+            portal_status  = 'MISSING'
+            partner_code   = None
+            submit_date    = None
+            bold_status    = 'UNKNOWN'
+            n_wells_portal = 0
 
         mbrave_status = 'FOUND' if mbrave_batches else 'MISSING'
         qc_status     = 'FOUND' if qc_info else 'MISSING'
         best_qc       = qc_info['best_status'] if qc_info else 'MISSING'
 
-        # Pipeline stage — furthest reached
-        # Order: portal → mbrave → qc → bold
         stages = []
-        if portal_status == 'FOUND':   stages.append('portal')
-        if mbrave_status == 'FOUND':   stages.append('mbrave')
-        if qc_status == 'FOUND':       stages.append('qc')
-        if bold_status == 'HAS_DATA':  stages.append('bold')
+        if portal_status == 'FOUND':  stages.append('portal')
+        if mbrave_status == 'FOUND':  stages.append('mbrave')
+        if qc_status == 'FOUND':      stages.append('qc')
+        if bold_status == 'HAS_DATA': stages.append('bold')
         pipeline_stage = stages[-1] if stages else 'none'
 
-        # missing_at: first stage not reached after a stage was reached
         missing_at = None
         if not skip_portal:
             all_stages = ['portal', 'mbrave', 'qc', 'bold']
@@ -187,20 +147,20 @@ def build_master_table(partner='ALL', skip_portal=False, verbose=False):
                         break
 
         rows.append({
-            'plate_id':        plate_id,
-            'partner':         partner_code,
-            'submit_date':     submit_date,
-            'portal_status':   portal_status,
-            'portal_n_wells':  n_wells_portal,
-            'mbrave_status':   mbrave_status,
-            'mbrave_batches':  ','.join(mbrave_batches),
-            'n_sequencings':   len(mbrave_batches),
-            'qc_status':       qc_status,
-            'qc_batches':      ','.join(qc_info['qc_batches']) if qc_info else '',
-            'best_qc_result':  best_qc,
-            'bold_status':     bold_status,
-            'pipeline_stage':  pipeline_stage,
-            'missing_at':      missing_at,
+            'plate_id':       plate_id,
+            'partner':        partner_code,
+            'submit_date':    submit_date,
+            'portal_status':  portal_status,
+            'portal_n_wells': n_wells_portal,
+            'mbrave_status':  mbrave_status,
+            'mbrave_batches': ','.join(mbrave_batches),
+            'n_sequencings':  len(mbrave_batches),
+            'qc_status':      qc_status,
+            'qc_batches':     ','.join(qc_info['qc_batches']) if qc_info else '',
+            'best_qc_result': best_qc,
+            'bold_status':    bold_status,
+            'pipeline_stage': pipeline_stage,
+            'missing_at':     missing_at,
         })
 
     df = pd.DataFrame(rows)
@@ -240,11 +200,11 @@ def save_outputs(df, partner, results_dir=None):
         results_dir = config.RESULTS_DIR
     os.makedirs(results_dir, exist_ok=True)
 
-    today        = datetime.datetime.now().strftime('%Y%m%d')
-    partner_tag  = partner.upper() if partner else 'ALL'
-    csv_path     = os.path.join(results_dir, f'bioscan_plate_status_{partner_tag}_{today}.csv')
-    xlsx_path    = os.path.join(results_dir, f'bioscan_plate_status_{partner_tag}_{today}.xlsx')
-    txt_path     = os.path.join(results_dir, f'missing_plates_{partner_tag}_{today}.txt')
+    today       = datetime.datetime.now().strftime('%Y%m%d')
+    partner_tag = partner.upper() if partner else 'ALL'
+    csv_path    = os.path.join(results_dir, f'bioscan_plate_status_{partner_tag}_{today}.csv')
+    xlsx_path   = os.path.join(results_dir, f'bioscan_plate_status_{partner_tag}_{today}.xlsx')
+    txt_path    = os.path.join(results_dir, f'missing_plates_{partner_tag}_{today}.txt')
 
     df.to_csv(csv_path, index=False)
     df.to_excel(xlsx_path, index=False)
@@ -280,7 +240,7 @@ def main():
     parser.add_argument('--partner', default='ALL',
         help='4-letter partner code (e.g. BGEP) or ALL')
     parser.add_argument('--skip-portal', action='store_true',
-        help='Skip ToL portal query (faster, no submit date/BOLD/partner info)')
+        help='Skip portal data (no submit date/BOLD/partner info)')
     parser.add_argument('--missing-only', action='store_true',
         help='Print only plates with missing_at set')
     parser.add_argument('--verbose', action='store_true')
