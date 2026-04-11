@@ -86,7 +86,7 @@ def build_master_table(partner='ALL', skip_portal=False, verbose=False):
         print("Step 3: Querying ToL Portal...")
         print("=" * 60)
         try:
-            from portal_query import get_all_bioscan_plates_from_portal, query_portal_for_plates
+            from read_portal_dump import load_portal_plate_summary
 
             # Strategy: query portal for all plates in our mBRAVE+QC union
             # This is faster than pulling everything from portal
@@ -94,12 +94,11 @@ def build_master_table(partner='ALL', skip_portal=False, verbose=False):
                                 set(plate_qc_summary.keys()))
             all_known_plates = {p for p in all_known_plates if not is_control(p)}
 
-            portal_plates_df = query_portal_for_plates(
-                list(all_known_plates), verbose=verbose)
+            portal_plates_df = load_portal_plate_summary(config.PORTAL_PLATES_CSV)
 
             if not portal_plates_df.empty:
-                print(f"  Portal: {len(portal_plates_df)} plates found")
-                print(f"  BOLD uploaded: "
+                print(f"  Portal: {len(portal_plates_df)} plates loaded from dump")
+                print(f"  BOLD uploaded: {portal_plates_df["bold_uploaded"].sum()} plates")
                       f"{portal_plates_df['bold_uploaded'].sum()} plates")
         except Exception as e:
             print(f"  ERROR querying portal: {e}")
