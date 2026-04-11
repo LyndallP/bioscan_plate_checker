@@ -23,21 +23,23 @@ def get_plates_from_batch(batch_folder, batch_path, verbose=False):
     """
     plates = set()
 
-    tsv_file = find_file_in_batch(batch_path, config.CONSENSUSSEQ_NETWORK_PATTERN)
-    if tsv_file:
-        try:
-            df = safe_read_csv(tsv_file, sep='\t',
-                               usecols=[config.MBRAVE_PID_COL], dtype=str)
-            for pid in df[config.MBRAVE_PID_COL].dropna():
-                plate = extract_plate_from_pid(pid)
-                if plate:
-                    plates.add(plate)
-            if verbose:
-                print(f"  {batch_folder}: {len(plates)} plates "
-                      f"({os.path.basename(tsv_file)})")
-            return plates
-        except Exception as e:
-            print(f"  WARNING: failed reading {tsv_file}: {e}")
+    import glob
+    tsv_files = sorted(glob.glob(os.path.join(batch_path, config.CONSENSUSSEQ_NETWORK_PATTERN)))
+    if tsv_files:
+        for tsv_file in tsv_files:
+            try:
+                df = safe_read_csv(tsv_file, sep='\t',
+                                   usecols=[config.MBRAVE_PID_COL], dtype=str)
+                for pid in df[config.MBRAVE_PID_COL].dropna():
+                    plate = extract_plate_from_pid(pid)
+                    if plate:
+                        plates.add(plate)
+            except Exception as e:
+                print(f"  WARNING: failed reading {tsv_file}: {e}")
+        if verbose:
+            print(f"  {batch_folder}: {len(plates)} plates "
+                  f"({len(tsv_files)} TSV file(s))")
+        return plates
 
     # Fallback to CSV
     csv_file = find_file_in_batch(batch_path, config.CONSENSUSSEQ_NETWORK_CSV_PATTERN)

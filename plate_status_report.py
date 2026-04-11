@@ -60,7 +60,7 @@ def build_master_table(partner='ALL', skip_portal=False, verbose=False):
     print("\n" + "=" * 60)
     print("Step 2: Scanning QC reports...")
     print("=" * 60)
-    plate_qc_summary, qc_resolved, qc_skipped, batches_missing_qc = build_qc_plate_index(
+    plate_qc_summary, mbrave_to_qc, qc_to_mbrave, cross_issues, batches_missing_qc = build_qc_plate_index(
         partner=partner, verbose=verbose
     )
     summarise_qc(plate_qc_summary, batches_missing_qc)
