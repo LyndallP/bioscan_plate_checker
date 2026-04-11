@@ -7,7 +7,7 @@ import os
 # ── Lustre data paths ─────────────────────────────────────────────────────────
 MBRAVE_DIR = "/lustre/scratch126/tol/teams/lawniczak/projects/bioscan/bioscan_qc/mbrave_batch_data"
 QC_DIR     = "/lustre/scratch126/tol/teams/lawniczak/projects/bioscan/bioscan_qc/qc_reports_rerun_Feb2026"
-RESULTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "results")
+RESULTS_DIR = "/lustre/scratch126/tol/teams/lawniczak/users/lp20/bioscan_plate_checker_results"
 
 # ── Batch deduplication rule (see utils.resolve_batches) ─────────────────────
 # Priority per base_num group: splits > plain > merged
