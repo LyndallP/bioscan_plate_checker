@@ -4,12 +4,42 @@ A pipeline tracking and quality assessment toolkit for BIOSCAN DNA barcoding dat
 
 ---
 
+## Input files
+
+All input data is read directly from lustre — nothing is copied or modified.
+
+### Portal manifest dump
+**Path:** `/lustre/scratch126/tol/teams/lawniczak/projects/bioscan/100k_paper/output/sts_manifests_YYYYMMDD.tsv`
+**Source:** Exported from the Tree of Life (ToL) portal by the data team. Updated periodically — check for a newer dated file before running.
+**Contains:** One row per specimen (well) for all BIOSCAN samples ever submitted. Includes plate ID (`sts_specimen.id`), submission date (`sts_submit_date`), partner code (`sts_gal_abbreviation`), and all BOLD fields: `bold_nuc` (sequence), `bold_bin_uri` (BIN assignment), `bold_sequence_upload_date`, `bold_bin_created_date`.
+**Why we use it:** This is the ground truth for what has been submitted to the project. It also contains the BOLD upload status and sequence for each specimen, allowing BOLD summaries without live API queries. Querying the portal live takes ~2 hours for 350k+ specimens; the dump is read in ~30 seconds.
+
+### mBRAVE batch data
+**Path:** `/lustre/scratch126/tol/teams/lawniczak/projects/bioscan/bioscan_qc/mbrave_batch_data/`
+**Source:** Output from the mBRAVE pipeline run at the Wellcome Sanger Institute. Organised by batch folder (e.g. `batch30/`, `batch51_0/`).
+**Contains:** Per batch: `*consensusseq_network.tsv` (one row per specimen per sequence produced, with taxonomy), `umi.*_sample_stats.txt` (one row per specimen showing read counts from demultiplexing).
+**Why we use it:** Tells us which plates and specimens made it through sequencing and produced a consensus sequence. The consensusseq file is upstream of QC — it contains all sequences before any quality filtering. The UMI stats file tells us the expected specimen list and read counts for each run.
+
+### QC reports
+**Path:** `/lustre/scratch126/tol/teams/lawniczak/projects/bioscan/bioscan_qc/qc_reports_rerun_Feb2026/`
+**Source:** Output from the BIOSCAN QC pipeline. Organised by batch folder matching the mBRAVE structure.
+**Contains:** Per batch: `filtered_metadata_batchN.csv` (all specimens with sequences, QC category 1-12, decision YES/NO/ON_HOLD), `qc_portal_batchN.csv` (all specimens including FAILED, used for repeat analysis), `BOLD_filtered_sequences_batchN.fasta` (exactly the sequences submitted to BOLD).
+**Why we use it:** The primary source for QC decisions per specimen. `filtered_metadata` is used for pass rate calculations. `qc_portal` is used for the specimen-level repeat analysis as it includes FAILED specimens. The FASTA files are used for sequence concordance checks against BOLD.
+
+### BOLD workbench exports
+**Path:** `/lustre/scratch126/tol/teams/lawniczak/users/lp20/bioscan_plate_checker_results/bold_workbench_YYYY.xlsx`
+**Source:** Downloaded manually from the BOLD workbench (https://bench.boldsystems.org) filtered by upload year. Maximum 99,999 records per download — split into `bold_workbench_YYYYa.xlsx` / `bold_workbench_YYYYb.xlsx` for high-volume years. Use the `Lab Sheet` tab only.
+**Contains:** One row per specimen on BOLD. Includes `Sample ID` (specimen ID), `BIN`, `Stop Codon`, `Contamination`, `Flagged Record`, `Barcode Compliant` flags. Does not contain the actual sequence.
+**Why we use it:** The only source for BOLD quality flags. Sequences flagged for stop codons or contamination do not receive BIN assignments — this file tells us which specimens are affected and why. Combined with the portal dump (which has the actual sequences), we can identify whether the QC pipeline has since produced a better sequence that should replace the flagged BOLD record.
+
+---
+
 ## Output file reference
 
-All outputs are written to the results directory:
+All outputs are written to:
 `/lustre/scratch126/tol/teams/lawniczak/users/lp20/bioscan_plate_checker_results/`
 
-Files are dated `YYYYMMDD`. Below is a complete reference of every file produced.
+Files are dated `YYYYMMDD`.
 
 ---
 
@@ -27,7 +57,7 @@ Files are dated `YYYYMMDD`. Below is a complete reference of every file produced
 
 | File | Type | Level | Description |
 |---|---|---|---|
-| `pipeline_report_YYYYMMDD.txt` | Text | Summary | Human-readable report of the full pipeline status. Shows overall pass-through rates at each stage, per-partner breakdown, plates flagged as old submissions not yet sequenced (configurable threshold, default 180 days), and BOLD upload gaps by partner. The best file to share with project managers or partners. |
+| `pipeline_report_YYYYMMDD.txt` | Text | Summary | Human-readable report of the full pipeline status. Shows overall pass-through rates at each stage, per-partner breakdown, plates flagged as old submissions not yet sequenced (configurable threshold, default 180 days), and BOLD upload gaps by partner. Best file to share with project managers or partners. |
 
 ---
 
@@ -35,18 +65,29 @@ Files are dated `YYYYMMDD`. Below is a complete reference of every file produced
 
 | File | Type | Level | Description |
 |---|---|---|---|
-| `bold_summary_report_YYYYMMDD.txt` | Text | Summary | Report of BOLD upload status. Shows how many specimens are uploaded per partner, which have no BIN URI (needing BOLD follow-up), and the distribution of upload dates for un-BINned specimens. |
-| `bold_missing_bin_YYYYMMDD.csv` | CSV | Specimen | Detail file. Every specimen that has a sequence on BOLD but no BIN URI assigned. Includes upload date and submission date. Use this to identify which specimens need chasing with the BOLD team. |
+| `bold_summary_report_YYYYMMDD.txt` | Text | Summary | Report of BOLD upload status by partner: specimens uploaded, BIN coverage, missing BINs, and upload date distribution for un-BINned specimens. |
+| `bold_missing_bin_YYYYMMDD.csv` | CSV | Specimen | Every specimen with a sequence on BOLD but no BIN URI. Includes upload date and submission date. Use to identify which specimens need chasing with the BOLD team. |
 | `bold_plate_summary_YYYYMMDD.csv` | CSV | Plate | Plate-level summary of BOLD upload counts, BIN coverage, and earliest/latest upload dates. |
 
 ---
 
-### From `repeat_analysis.py` — repeat sequencing
+### From `repeat_analysis.py` — repeat sequencing (plate level)
 
 | File | Type | Level | Description |
 |---|---|---|---|
-| `repeat_analysis_YYYYMMDD.csv` | CSV | Plate | One row per plate sequenced more than once. Shows all batches, pass rate in first vs best vs last sequencing, improvement achieved, and whether the plate has been uploaded to BOLD. The key file for understanding whether repeat sequencing was worthwhile. |
+| `repeat_analysis_YYYYMMDD.csv` | CSV | Plate | One row per plate sequenced more than once. Shows all batches, pass rate in first vs best vs last sequencing, and improvement achieved. |
 | `repeat_analysis_YYYYMMDD.xlsx` | Excel | Plate | Same as above, Excel format. |
+
+---
+
+### From `repeat_analysis_specimens.py` — repeat sequencing (specimen level)
+
+| File | Type | Level | Description |
+|---|---|---|---|
+| `repeat_specimens_summary_YYYYMMDD.csv` | CSV | Specimen | One row per repeated specimen. Shows first/last/best QC decision, whether outcome improved or declined, and all batches as a comma-separated list. Key file for understanding repeat sequencing outcomes at specimen level. |
+| `repeat_specimens_transitions_YYYYMMDD.csv` | CSV | Summary | Transition matrix of first → last QC decision (PASS/ON_HOLD/FAILED) with counts and percentages. Shows how many specimens improved, declined, or stayed the same across repeat sequencings. |
+| `repeat_specimens_long_YYYYMMDD.csv` | CSV | Specimen | One row per specimen per batch, with QC decision and full description text. Good for detailed investigation of specific specimens or batches. |
+| `repeat_specimens_wide_YYYYMMDD.csv` | CSV | Specimen | One row per specimen, with one column per batch showing the decision. Easiest to read in Excel for viewing the trajectory at a glance. |
 
 ---
 
@@ -54,8 +95,8 @@ Files are dated `YYYYMMDD`. Below is a complete reference of every file produced
 
 | File | Type | Level | Description |
 |---|---|---|---|
-| `missing_specimens_categorised_YYYYMMDD.csv` | CSV | Specimen | One row per specimen that is absent from the consensusseq_network table. Categorised as: Cat1 (zero reads — well failed), Cat2_low (few reads, no consensus — below assembly threshold), or Cat2_high (reads present but no consensus — unexpected, investigate). |
-| `missing_specimens_batch_summary_YYYYMMDD.csv` | CSV | Batch | Batch-level counts of expected vs present specimens, with counts in each category and percentage missing. Use this to identify batches with systematic assembly failures. |
+| `missing_specimens_categorised_YYYYMMDD.csv` | CSV | Specimen | One row per specimen absent from the consensusseq table. Categorised as Cat1 (zero reads), Cat2_low (few reads, no consensus), or Cat2_high (reads present but no consensus — investigate). |
+| `missing_specimens_batch_summary_YYYYMMDD.csv` | CSV | Batch | Batch-level counts of expected vs present specimens in each category. Use to identify batches with systematic assembly failures. |
 
 ---
 
@@ -63,31 +104,32 @@ Files are dated `YYYYMMDD`. Below is a complete reference of every file produced
 
 | File | Type | Level | Description |
 |---|---|---|---|
-| `bold_workbench_combined.csv` | CSV | Specimen | **Cache file** — combined workbench records from all annual files. Auto-generated on first run. Do not edit manually; delete and rerun with `--rebuild-cache` if source files change. |
-| `bold_workbench_report_YYYYMMDD.txt` | Text | Summary | Report of quality flags (stop codon, contamination, flagged record, BIN compliance) by partner. Includes sequence comparison results for flagged specimens. |
-| `bold_workbench_plates_YYYYMMDD.csv` | CSV | Plate | Plate-level counts of quality flags. Shows how many specimens per plate are flagged for each issue. |
-| `bold_flagged_comparison_YYYYMMDD.csv` | CSV | Specimen | **Routine output.** For every flagged specimen (stop codon / contamination / flagged record), shows whether the BOLD sequence is IDENTICAL or DIFFERENT to the QC-passed FASTA sequence. DIFFERENT = QC has found a better sequence and BOLD should be updated. |
-| `bold_full_concordance_YYYYMMDD.csv` | CSV | Specimen | **Ad hoc output** (`--full-concordance` only). Full sense check — every sequence on BOLD compared against the QC FASTA. Confirms 100% concordance or flags any drift. |
+| `bold_workbench_combined.csv` | CSV | Cache | Combined workbench records from all annual files. Auto-generated on first run. Delete and rerun with `--rebuild-cache` if source files change. |
+| `bold_workbench_report_YYYYMMDD.txt` | Text | Summary | Quality flag counts (stop codon, contamination, flagged record, BIN compliance) by partner, plus sequence comparison results. |
+| `bold_workbench_plates_YYYYMMDD.csv` | CSV | Plate | Plate-level counts of each quality flag type. |
+| `bold_flagged_comparison_YYYYMMDD.csv` | CSV | Specimen | For every flagged specimen, shows whether the BOLD sequence is IDENTICAL or DIFFERENT to the QC-passed FASTA. |
+| `bold_needs_resubmission_YYYYMMDD.csv` | CSV | Specimen | **Key actionable output.** Specimens with no BIN, a quality flag, and a DIFFERENT (better) sequence in QC. These should be resubmitted to BOLD to obtain a BIN. Includes partner, flag type, and upload date. |
+| `bold_flagged_no_alternative_YYYYMMDD.csv` | CSV | Specimen | Flagged specimens where the QC sequence is IDENTICAL to BOLD — flag is genuine, no better sequence available. Requires manual expert assessment. |
+| `bold_full_concordance_YYYYMMDD.csv` | CSV | Specimen | **Ad hoc only** (`--full-concordance`). Every sequence on BOLD compared against QC FASTA. Confirms 100% concordance or flags drift. |
 
 ---
 
-### From `bold_check.R` — quarterly BOLD sanity check (job output)
+### From `bold_check.R` — quarterly BOLD sanity check
 
 | File | Type | Level | Description |
 |---|---|---|---|
-| `bold_check_specimens_YYYYMMDD.csv` | CSV | Specimen | Full specimen-level comparison of portal vs BOLD records. 198MB. Use as raw cache — do not delete between runs. |
+| `bold_check_specimens_YYYYMMDD.csv` | CSV | Specimen | Full portal vs BOLD comparison. Large file (~200MB) — keep as raw cache. |
 | `bold_check_plates_YYYYMMDD.csv` | CSV | Plate | Plate-level BOLD coverage summary including BIN counts. |
-| `bold_check_JOBID.log` | Text | Log | Job log showing download progress and final summary. |
-| `bold_check_JOBID.err` | Text | Log | Job error log (should be empty if successful). |
+| `bold_check_JOBID.log` | Text | Log | Job log with download progress and final summary. |
 
 ---
 
-### Internal/cache files (not for routine use)
+### Internal/cache files
 
 | File | Description |
 |---|---|
-| `portal_plates_from_dump.csv` | Cached plate-level portal summary built by `read_portal_dump.py`. Rebuilt when portal dump is updated. |
-| `bold_workbench_combined.csv` | Cached combined workbench file. Rebuilt with `--rebuild-cache`. |
+| `portal_plates_from_dump.csv` | Cached plate-level portal summary. Rebuilt by `read_portal_dump.py` when dump is updated. |
+| `bold_workbench_combined.csv` | Cached combined workbench. Rebuilt with `--rebuild-cache`. |
 
 ---
 
@@ -106,13 +148,17 @@ cd bioscan_plate_checker
 conda activate bioscan-ops
 ```
 
-### 3. Build the portal plate summary (run once, or when portal dump is updated)
+### 3. Update config.py when a new portal dump is available
+
+Edit `PORTAL_DUMP_TSV` in `config.py` to point to the latest `sts_manifests_YYYYMMDD.tsv`.
+
+### 4. Build the portal plate summary
 
 ```bash
 python3 read_portal_dump.py
 ```
 
-### 4. API key for BOLD (only needed for the quarterly BOLD sanity check)
+### 5. API key for BOLD (quarterly sanity check only)
 
 ```bash
 cp .env.example .env
@@ -127,35 +173,26 @@ cp .env.example .env
 # 1. Build portal plate summary from dump (~30 seconds)
 python3 read_portal_dump.py
 
-# 2. Build master plate status table: portal → mBRAVE → QC → BOLD
+# 2. Master plate status table: portal → mBRAVE → QC → BOLD
 python3 plate_status_report.py --partner ALL
 
-# 3. Human-readable pipeline report with flagged plates
+# 3. Human-readable pipeline report
 python3 generate_pipeline_report.py
 
-# 4. BOLD upload and BIN URI summary (from portal dump, no API needed)
+# 4. BOLD upload and BIN URI summary
 python3 bold_summary_from_portal.py --partner ALL
 
-# 5. Repeat sequencing analysis
+# 5. Repeat analysis — plate level
 python3 repeat_analysis.py --partner ALL
 
-# 6. Missing specimen analysis (scans all mBRAVE batches — takes ~10 mins)
+# 6. Repeat analysis — specimen level with QC decisions per batch
+python3 repeat_analysis_specimens.py --partner ALL
+
+# 7. Missing specimen analysis (~10 mins)
 python3 missing_specimen_analysis.py --partner ALL
-```
 
-### When new BOLD workbench exports are available
-
-Place files named `bold_workbench_YYYY.csv` (or `bold_workbench_YYYYa.csv`, `bold_workbench_YYYYb.csv` for split downloads) in the results directory, then:
-
-```bash
-# Routine: quality flag report + flagged sequence comparison vs QC
-python3 bold_workbench_analysis.py --partner ALL
-
-# Ad hoc: full concordance of ALL sequences on BOLD vs QC FASTA
-python3 bold_workbench_analysis.py --partner ALL --full-concordance
-
-# If new year files added, rebuild the combined cache
-python3 bold_workbench_analysis.py --rebuild-cache
+# 8. BOLD workbench analysis (when new workbench files downloaded)
+python3 bold_workbench_analysis.py --partner ALL --rebuild-cache
 ```
 
 ### Quarterly BOLD sanity check
@@ -172,7 +209,7 @@ bsub < run_bold_check.sh
 |---|---|
 | `/lustre/.../mbrave_batch_data/` | mBRAVE output by batch |
 | `/lustre/.../qc_reports_rerun_Feb2026/` | QC reports by batch |
-| `/lustre/.../100k_paper/output/sts_manifests_20260408.tsv` | Portal dump — all specimens with BOLD fields |
+| `/lustre/.../100k_paper/output/sts_manifests_YYYYMMDD.tsv` | Portal dump |
 | `/lustre/.../bioscan_plate_checker_results/` | All outputs and workbench input files |
 
 ---
@@ -182,14 +219,14 @@ bsub < run_bold_check.sh
 ---
 
 ### `config.py`
-Central configuration. Edit this if lustre paths or the portal dump filename change.
+Central configuration. Update `PORTAL_DUMP_TSV` when a new portal dump is available.
 
 ---
 
 ### `utils.py`
 Shared utilities: batch folder resolution, plate ID parsing, cross-directory batch mapping, safe CSV reading.
 
-**Batch deduplication rules (applied independently per directory):**
+**Batch deduplication rules:**
 1. Splits (`batchN_0`, `batchN_1`...) always preferred over plain (`batchN`) or merged (`batchN_merged`)
 2. Plain used only if no splits exist
 3. Merged used only as last resort
@@ -201,19 +238,17 @@ python3 utils.py   # run the batch structure audit
 ---
 
 ### `read_portal_dump.py`
-Reads the pre-exported portal manifest TSV and builds a plate-level summary CSV.
-Avoids live portal queries which take ~2 hours for 350k+ specimens.
+Reads the portal manifest TSV and builds a plate-level summary CSV. Run whenever a new dump is available.
 
 ```bash
 python3 read_portal_dump.py
-python3 read_portal_dump.py --input /path/to/sts_manifests_20260408.tsv
+python3 read_portal_dump.py --input /path/to/sts_manifests_20260427.tsv
 ```
 
 ---
 
 ### `plate_status_report.py`
-**Main entry point.** Joins portal, mBRAVE, and QC data into a master plate status table.
-Controls (`CONTROL_NEG_*`, `CONTROL_POS_*`) are excluded throughout.
+Main entry point. Joins portal, mBRAVE, and QC into a master plate status table. Controls excluded throughout.
 
 ```bash
 python3 plate_status_report.py --partner ALL
@@ -225,7 +260,7 @@ python3 plate_status_report.py --partner ALL --missing-only
 ---
 
 ### `generate_pipeline_report.py`
-Human-readable pipeline status report. Flags plates submitted more than N days ago that have not yet been sequenced.
+Human-readable pipeline report. Flags plates submitted more than N days ago not yet sequenced.
 
 ```bash
 python3 generate_pipeline_report.py
@@ -235,7 +270,7 @@ python3 generate_pipeline_report.py --old-threshold-days 180
 ---
 
 ### `bold_summary_from_portal.py`
-BOLD upload and BIN URI summaries from the portal dump. No API, no R required.
+BOLD upload and BIN URI summaries from the portal dump. No API or R required.
 
 ```bash
 python3 bold_summary_from_portal.py --partner ALL
@@ -244,41 +279,8 @@ python3 bold_summary_from_portal.py --partner FACE
 
 ---
 
-### `bold_workbench_analysis.py`
-Analyses BOLD workbench exports to assess quality flags and compare flagged sequences against QC output.
-
-**Background:** BOLD flags sequences for Stop Codon (internal stop codons suggesting pseudogenes or NUMTs), Contamination (foreign DNA), and Flagged Record (general quality concern). Flagged sequences do not receive BIN assignments. The BIOSCAN QC pipeline includes a stop codon detection step that searches for alternative sequences — this script checks whether a cleaner sequence now exists in QC that should replace the flagged BOLD record.
-
-**Input files** (place in results directory, named by year):
-```
-bold_workbench_2021.csv
-bold_workbench_2022.csv
-bold_workbench_2023.csv
-bold_workbench_2024a.csv   ← split downloads use a/b suffix
-bold_workbench_2024b.csv
-bold_workbench_2025a.csv
-bold_workbench_2025b.csv
-bold_workbench_2026.csv
-```
-Each file: downloaded from BOLD workbench filtered by year (max 99,999 records per download), skip 2 header rows, columns include Sample ID, BIN, Stop Codon, Contamination, Flagged Record, Barcode Compliant.
-
-**Sequence comparison results:**
-- `IDENTICAL` — same sequence in BOLD and QC FASTA → flag is genuine, no update needed
-- `DIFFERENT` → QC has a better sequence → **BOLD record should be updated**
-- `QC_ONLY` — passed QC but not on BOLD
-- `BOLD_ONLY` — on BOLD but not in QC FASTA
-
-```bash
-python3 bold_workbench_analysis.py --partner ALL          # routine
-python3 bold_workbench_analysis.py --full-concordance     # ad hoc sense check
-python3 bold_workbench_analysis.py --rebuild-cache        # after adding new year files
-python3 bold_workbench_analysis.py --skip-sequence-comparison  # flags only
-```
-
----
-
 ### `repeat_analysis.py`
-Plates sequenced more than once — pass rate comparison between batches.
+Plate-level repeat analysis. Pass rate comparison between first and best sequencing batch.
 
 ```bash
 python3 repeat_analysis.py --partner ALL
@@ -287,15 +289,28 @@ python3 repeat_analysis.py --min-sequencings 2
 
 ---
 
+### `repeat_analysis_specimens.py`
+Specimen-level repeat analysis. For every specimen appearing in more than one batch, shows the QC decision (PASS/ON_HOLD/FAILED) in each batch. Source is `qc_portal_batchN.csv` which includes all three decision types including FAILED specimens.
+
+Key outputs include the transition matrix (e.g. FAILED → PASS: 6,005 specimens) showing the effectiveness of repeat sequencing across the whole dataset.
+
+```bash
+python3 repeat_analysis_specimens.py --partner ALL
+python3 repeat_analysis_specimens.py --decision-filter FAILED
+python3 repeat_analysis_specimens.py --min-appearances 2
+```
+
+---
+
 ### `missing_specimen_analysis.py`
-Categorises specimens absent from consensusseq by read count category.
+Categorises specimens absent from consensusseq by read count.
 
 | Category | Definition | Interpretation |
 |---|---|---|
 | **Cat1** | Count = 0 | Well failed to sequence. Expected. |
 | **Cat2_low** | 0 < Count < threshold | Below assembly minimum. |
 | **Cat2_high** | Count ≥ threshold, no consensus | Assembly failed despite reads. Investigate. |
-| **Cat3** | Absent from UMI stats | Barcode assignment error. Zero cases detected. |
+| **Cat3** | Absent from UMI stats | Barcode error. Zero cases detected. |
 
 ```bash
 python3 missing_specimen_analysis.py --partner ALL
@@ -305,9 +320,40 @@ python3 missing_specimen_analysis.py --low-read-threshold 50
 
 ---
 
+### `bold_workbench_analysis.py`
+Analyses BOLD workbench exports to assess quality flags and compare sequences.
+
+**Input files** (place in results directory):
+```
+bold_workbench_2021.xlsx
+bold_workbench_2022.xlsx
+bold_workbench_2023.xlsx
+bold_workbench_2024a.xlsx   ← split if >99,999 records
+bold_workbench_2024b.xlsx
+bold_workbench_2025a.xlsx
+bold_workbench_2025b.xlsx
+bold_workbench_2026.xlsx
+```
+
+**Sequence comparison results:**
+- `IDENTICAL` — same sequence in BOLD and QC → flag is genuine
+- `DIFFERENT` → QC has better sequence → **resubmit to BOLD**
+- `QC_ONLY` — passed QC, not on BOLD
+- `BOLD_ONLY` — on BOLD, not in QC FASTA
+- `NEITHER` — flagged specimen with no sequence in either system
+
+```bash
+python3 bold_workbench_analysis.py --partner ALL          # routine
+python3 bold_workbench_analysis.py --full-concordance     # ad hoc
+python3 bold_workbench_analysis.py --rebuild-cache        # after new files
+python3 bold_workbench_analysis.py --skip-sequence-comparison
+```
+
+---
+
 ### `bold_check.R` + `run_bold_check.sh`
 Quarterly BOLDconnectR sanity check. Confirms portal and BOLD are in sync.
-Run time ~40 minutes. Requires R module and API key.
+Portal/BOLD concordance confirmed 100% as of April 2026.
 
 ```bash
 bsub < run_bold_check.sh
@@ -318,8 +364,8 @@ bsub < run_bold_check.sh
 ## BOLD API key security
 
 - Store in `~/bioscan_plate_checker/.env` (in `.gitignore`, never committed)
-- Load with `export $(cat .env | xargs)` before running R scripts
-- See `.env.example` for required format
+- Load with `export $(cat .env | xargs)` before R scripts
+- See `.env.example` for format
 
 ---
 
@@ -340,8 +386,11 @@ bsub < run_bold_check.sh
 - **324 plates** submitted but not yet in mBRAVE — 42 from 2023 (FACE, FRBX) warrant investigation
 - **702 plates** through QC but not yet on BOLD
 - **6,261 specimens** on BOLD with no BIN — stop codon and contamination flags confirmed as root cause; FACE (803), RRNW (386), CAMP (332) most affected
-- **57 specimens** absent from BOLD workbench entirely — all BGE partners (BGKU, BGPT, BGEG); edge well positions suggest quality-based removal by BOLD team
+- **2,952 specimens** where QC has a better sequence than the flagged BOLD record → candidates for resubmission
+- **1,912 specimens** with genuine flags — same sequence in QC and BOLD, need manual expert assessment
+- **57 specimens** absent from BOLD workbench entirely — all BGE partners; edge well positions suggest quality-based removal
 - **Portal/BOLD concordance: 100%** — all 272,005 specimens confirmed on BOLD
-- **248 plates** sequenced more than once; average improvement 6.1%; TOL-BGEP-010 most improved (6.5% → 98.9%)
-- **6,208 specimens** with reads but no consensus — concentrated in BGKU and WALW (aquatic invertebrates; taxon-specific assembly failure)
+- **21,780 specimens** sequenced more than once; 6,005 improved from FAILED → PASS; 4,351 persistently FAILED
+- **248 plates** sequenced more than once; average pass rate improvement 6.1%; TOL-BGEP-010 most improved (6.5% → 98.9%)
+- **6,208 specimens** with reads but no consensus — concentrated in BGKU and WALW (aquatic invertebrates, taxon-specific assembly failure)
 - **Cat3 = 0** — no demultiplexing failures detected across any batch
