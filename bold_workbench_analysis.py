@@ -452,6 +452,66 @@ def main():
             full_comp.to_csv(full_path, index=False)
             print(f"  Full concordance saved: {full_path}")
 
+
+    # ── Cross-analysis: DIFFERENT vs missing BIN list ────────────────────────
+    if flagged_comp is not None and len(flagged_comp) > 0:
+        print("\n" + "=" * 60)
+        print("Step: Cross-analysis — flagged comparison vs missing BIN list")
+        print("=" * 60)
+
+        import glob as _glob
+        bin_files = sorted(_glob.glob(
+            os.path.join(config.RESULTS_DIR, 'bold_missing_bin_*.csv')))
+
+        if bin_files:
+            no_bin_df  = pd.read_csv(bin_files[-1], dtype=str)
+            no_bin_ids = set(no_bin_df['sts_specimen.id'].str.strip())
+
+            # DIFFERENT + no BIN = resubmit to BOLD with better QC sequence
+            diff       = flagged_comp[flagged_comp['sequence_status'] == 'DIFFERENT'].copy()
+            actionable = diff[diff['specimen_id'].isin(no_bin_ids)].copy()
+            actionable = actionable.merge(
+                no_bin_df[['sts_specimen.id','upload_date','submit_date']].rename(
+                    columns={'sts_specimen.id':'specimen_id'}),
+                on='specimen_id', how='left')
+
+            resub_path = os.path.join(config.RESULTS_DIR,
+                                      f'bold_needs_resubmission_{today}.csv')
+            actionable.to_csv(resub_path, index=False)
+            print(f"  {len(actionable)} specimens: no BIN + flagged + QC has better sequence")
+            print(f"  Saved: {resub_path}")
+            print(f"  These should be resubmitted to BOLD with the QC sequence")
+            print(f"\n  By partner:")
+            for p, n in actionable.groupby('partner_code').size().sort_values(
+                    ascending=False).items():
+                print(f"    {p:<8}: {n}")
+
+            # IDENTICAL + flagged = genuine flag, no better sequence, needs manual review
+            identical = flagged_comp[flagged_comp['sequence_status'] == 'IDENTICAL'].copy()
+            identical = identical.merge(
+                no_bin_df[['sts_specimen.id','upload_date','submit_date']].rename(
+                    columns={'sts_specimen.id':'specimen_id'}),
+                on='specimen_id', how='left')
+
+            identical_path = os.path.join(config.RESULTS_DIR,
+                                          f'bold_flagged_no_alternative_{today}.csv')
+            identical.to_csv(identical_path, index=False)
+            print(f"\n  {len(identical)} specimens: flagged, IDENTICAL sequence in QC FASTA")
+            print(f"  Flag is genuine — no better sequence available")
+            print(f"  Saved: {identical_path}")
+            print(f"  These need manual sequence assessment")
+            print(f"\n  By flag type:")
+            print(f"    stop_codon : {identical['has_stop_codon'].astype(str).eq('True').sum()}")
+            print(f"    contam     : {identical['has_contam'].astype(str).eq('True').sum()}")
+            print(f"    is_flagged : {identical['is_flagged'].astype(str).eq('True').sum()}")
+            print(f"\n  By partner:")
+            for p, n in identical.groupby('partner_code').size().sort_values(
+                    ascending=False).items():
+                print(f"    {p:<8}: {n}")
+        else:
+            print("  WARNING: no bold_missing_bin_*.csv found.")
+            print("  Run bold_summary_from_portal.py first.")
+
     # Plate summary
     plate_summary = wb_df.groupby('plate_id').agg(
         partner      =('partner_code','first'),
@@ -473,8 +533,11 @@ def main():
                     args.partner, report_path)
 
     print(f"\nOutputs:")
-    print(f"  {report_path}")
-    print(f"  {plate_path}")
+    print(f"  {report_path}       <- full flag report")
+    print(f"  {plate_path}  <- plate-level flag counts")
+    if flagged_comp is not None:
+        print(f"  bold_needs_resubmission_{today}.csv   <- BOLD records to update (DIFFERENT + no BIN)")
+        print(f"  bold_flagged_no_alternative_{today}.csv <- genuine flags, manual review needed (IDENTICAL)")
 
 
 if __name__ == '__main__':
