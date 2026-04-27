@@ -137,9 +137,11 @@ def load_workbench(results_dir, rebuild_cache=False, verbose=False):
     print("Reading annual workbench files...")
     dfs = []
     for year in WORKBENCH_YEARS:
-        # Match bold_workbench_2024.csv OR bold_workbench_2024a.csv, 2024b.csv etc.
-        pattern = os.path.join(results_dir, f"bold_workbench_{year}*.csv")
-        year_files = sorted(glob.glob(pattern))
+        # Match bold_workbench_2024.xlsx/csv OR bold_workbench_2024a.xlsx/csv etc.
+        year_files = sorted(
+            glob.glob(os.path.join(results_dir, f"bold_workbench_{year}*.xlsx")) +
+            glob.glob(os.path.join(results_dir, f"bold_workbench_{year}*.csv"))
+        )
         # Exclude the combined cache file
         year_files = [f for f in year_files if 'combined' not in os.path.basename(f)]
         if not year_files:
@@ -148,7 +150,13 @@ def load_workbench(results_dir, rebuild_cache=False, verbose=False):
             continue
         for path in year_files:
             try:
-                df = pd.read_csv(path, header=2, dtype=str, low_memory=False)
+                ext = os.path.splitext(path)[1].lower()
+                if ext in ('.xlsx', '.xls'):
+                    df = pd.read_excel(path, sheet_name='Lab Sheet',
+                                       header=2, dtype=str)
+                else:
+                    df = pd.read_csv(path, header=2, dtype=str,
+                                     low_memory=False)
                 df['source_year'] = str(year)
                 dfs.append(df)
                 print(f"  {os.path.basename(path)}: {len(df)} records")
