@@ -308,14 +308,25 @@ def main():
     summary_path = os.path.join(config.RESULTS_DIR,
                                 f'repeat_specimens_summary_{today}.csv')
 
+    # Save transition matrix
+    transitions = summary_df.groupby(
+        ['first_decision', 'last_decision']).size().reset_index(name='n')
+    transitions['pct_of_total'] = (
+        100 * transitions['n'] / len(summary_df)).round(1)
+    transitions = transitions.sort_values('n', ascending=False)
+    transition_path = os.path.join(config.RESULTS_DIR,
+                                   f'repeat_specimens_transitions_{today}.csv')
+    transitions.to_csv(transition_path, index=False)
+
     long_df.to_csv(long_path, index=False)
     wide_df.to_csv(wide_path, index=False)
     summary_df.to_csv(summary_path, index=False)
 
     print(f"\nOutputs written:")
-    print(f"  {summary_path}  <- one row per specimen, trajectory summary")
-    print(f"  {long_path}     <- one row per specimen per batch")
-    print(f"  {wide_path}     <- one row per specimen, decisions as columns")
+    print(f"  {summary_path}     <- one row per specimen, trajectory summary")
+    print(f"  {transition_path}  <- transition matrix (first → last decision)")
+    print(f"  {long_path}        <- one row per specimen per batch")
+    print(f"  {wide_path}        <- one row per specimen, decisions as columns")
 
 
 if __name__ == '__main__':
