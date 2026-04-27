@@ -1,0 +1,9 @@
+.env
+*.env
+results/
+portal_plates_from_dump.csv
+__pycache__/
+*.pyc
+*.pyo
+*.Rhistory
+*.RData
