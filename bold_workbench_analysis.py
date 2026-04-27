@@ -137,23 +137,28 @@ def load_workbench(results_dir, rebuild_cache=False, verbose=False):
     print("Reading annual workbench files...")
     dfs = []
     for year in WORKBENCH_YEARS:
-        path = os.path.join(results_dir, WORKBENCH_PATTERN.format(year=year))
-        if not os.path.exists(path):
+        # Match bold_workbench_2024.csv OR bold_workbench_2024a.csv, 2024b.csv etc.
+        pattern = os.path.join(results_dir, f"bold_workbench_{year}*.csv")
+        year_files = sorted(glob.glob(pattern))
+        # Exclude the combined cache file
+        year_files = [f for f in year_files if 'combined' not in os.path.basename(f)]
+        if not year_files:
             if verbose:
                 print(f"  {year}: not found")
             continue
-        try:
-            df = pd.read_csv(path, header=2, dtype=str, low_memory=False)
-            df['source_year'] = str(year)
-            dfs.append(df)
-            print(f"  {year}: {len(df)} records")
-        except Exception as e:
-            print(f"  {year}: ERROR — {e}")
+        for path in year_files:
+            try:
+                df = pd.read_csv(path, header=2, dtype=str, low_memory=False)
+                df['source_year'] = str(year)
+                dfs.append(df)
+                print(f"  {os.path.basename(path)}: {len(df)} records")
+            except Exception as e:
+                print(f"  {os.path.basename(path)}: ERROR — {e}")
 
     if not dfs:
         raise FileNotFoundError(
             f"No workbench files found in {results_dir}\n"
-            f"Expected: bold_workbench_YYYY.csv for years {WORKBENCH_YEARS}"
+            f"Expected: bold_workbench_YYYY.csv or bold_workbench_YYYYa.csv etc."
         )
 
     combined = pd.concat(dfs, ignore_index=True)
