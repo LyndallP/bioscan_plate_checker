@@ -48,7 +48,7 @@ PORTAL_BOLD_FIELD    = "bold_nuc"              # non-empty -> uploaded to BOLD
 
 # ── Portal dump (pre-exported TSV — avoids live portal queries) ───────────────
 PORTAL_DUMP_TSV = ("/lustre/scratch126/tol/teams/lawniczak/projects/bioscan"
-                   "/100k_paper/output/sts_manifests_20260408.tsv")
+                   "/100k_paper/output/sts_manifests_20260427.tsv")
 PORTAL_PLATES_CSV = os.path.join(
     "/lustre/scratch126/tol/teams/lawniczak/users/lp20/bioscan_plate_checker_results",
     "portal_plates_from_dump.csv"
