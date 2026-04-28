@@ -234,25 +234,41 @@ def read_qc_portal(batch_folder, batch_path):
 
 def read_filtered_metadata(batch_folder, batch_path):
     """
-    Read filtered_metadata for category numbers (always has number-prefixed
-    descriptions regardless of batch format). FAILed specimens not present here.
-    Returns DataFrame: pid | category
+    Read filtered_metadata for category numbers.
+    Uses the 'category' column directly (integer 1-12).
+    FAILed specimens are not present in filtered_metadata.
+
+    Two pid formats exist:
+      Older batches (batch30): pid = full specimen ID e.g. CAMP_131_A1
+      Newer batches (batch54): pid = plate ID only e.g. CAMP_211
+    We return both the raw pid AND a well-stripped version so the
+    caller can match against qc_portal pids which always include the well.
+    Returns DataFrame: pid_meta | category | well_from_meta
     """
     files = glob.glob(os.path.join(batch_path, 'filtered_metadata_batch*.csv'))
     if not files:
         return pd.DataFrame()
     try:
         df = safe_read_csv(files[0], dtype=str)
-        # Handle both column name variants
         if 'pid' not in df.columns:
             df.columns = [c.strip().strip('"') for c in df.columns]
-        desc_col = next((c for c in ['category_explanation', 'description',
-                                      'bioscan_qc_category'] if c in df.columns), None)
-        if desc_col is None:
+        if 'category' not in df.columns:
             return pd.DataFrame()
-        df['category'] = df[desc_col].str.strip().str.extract(r'^(\d+)[, ]').fillna('')
-        df['pid'] = df['pid'].str.strip().str.strip('"')
-        return df[['pid', 'category']].copy()
+        df['pid_meta'] = df['pid'].str.strip().str.strip('"')
+        df['category']  = df['category'].str.strip()
+
+        # Detect format: newer batches have pid = plate ID (no well)
+        # Well coordinate is in a separate column 'Well.Coordinate'
+        well_col = next((c for c in ['Well.Coordinate', 'Well Coordinate',
+                                      'well_coordinate'] if c in df.columns), None)
+        if well_col:
+            # Newer format: pid is plate ID, well is separate
+            df['full_pid'] = df['pid_meta'] + '_' + df[well_col].str.strip()
+        else:
+            # Older format: pid already includes well
+            df['full_pid'] = df['pid_meta']
+
+        return df[['full_pid', 'category']].copy()
     except Exception:
         return pd.DataFrame()
 
@@ -278,7 +294,7 @@ def load_all_qc_decisions(qc_dir, qc_resolved, verbose=False):
         meta_df = read_filtered_metadata(batch_folder, batch_path)
         cat_lookup = {}
         if not meta_df.empty:
-            cat_lookup = dict(zip(meta_df['pid'], meta_df['category']))
+            cat_lookup = dict(zip(meta_df['full_pid'], meta_df['category']))
 
         for _, row in portal_df.iterrows():
             pid = str(row['pid']).strip()
