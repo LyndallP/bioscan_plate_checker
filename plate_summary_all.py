@@ -346,6 +346,11 @@ def load_all_qc_decisions(qc_dir, qc_resolved, verbose=False):
         if _os.path.isdir(_os.path.join(qc_dir, d))
         and d.startswith('batch')
         and 'EXCLUDED' not in d
+        and 'RnD' not in d
+        and 'PCR1_volume' not in d
+        and '_repeat_' not in d
+        and '_rep_' not in d
+        and '_merged' not in d
     ])
 
     for batch_folder in all_qc_batches:
