@@ -140,6 +140,15 @@ def load_umi_data(mbrave_dir, resolved_batches, verbose=False):
     """
     Load sample and control stats from all mBRAVE batches.
 
+    IMPORTANT: We scan ALL batch folders in mBRAVE, not just the deduplicated
+    resolved list. The deduplication (preferring splits over plain) is correct
+    for QC reports where the same plates appear in both plain and split folders.
+    But for UMI stats, plain and split batch folders often contain COMPLETELY
+    DIFFERENT plates (e.g. batch27 plain = BGEP plates 111-200, while
+    batch27_1/2/3/4 = other partner plates). Skipping plain would lose that data.
+    Grouping by plate_id is safe - duplicate entries across batches just add
+    more batch entries, which is handled correctly by the best-result logic.
+
     Returns:
       specimens   : plate_id -> batch -> [specimen labels]
       controls_neg: plate_id -> batch -> [{'type','well','sqpp_id','count','label'}]
@@ -149,7 +158,20 @@ def load_umi_data(mbrave_dir, resolved_batches, verbose=False):
     controls_neg = defaultdict(lambda: defaultdict(list))
     controls_pos = defaultdict(lambda: defaultdict(list))
 
-    for batch_folder in resolved_batches:
+    # Scan ALL batch folders, not just resolved (deduped) ones
+    import os as _os
+    all_batches = sorted([
+        d for d in _os.listdir(mbrave_dir)
+        if _os.path.isdir(_os.path.join(mbrave_dir, d))
+        and d.startswith('batch')
+        and 'EXCLUDED' not in d
+        and 'RnD' not in d
+        and 'PCR1_volume' not in d
+        and '_repeat_' not in d
+        and '_rep_' not in d
+    ])
+
+    for batch_folder in all_batches:
         batch_path = os.path.join(mbrave_dir, batch_folder)
 
         # Sample stats
@@ -164,7 +186,10 @@ def load_umi_data(mbrave_dir, resolved_batches, verbose=False):
                     label    = str(row.get('Label', '')).strip()
                     plate_id = _normalise_plate_id(str(row.get('Sample Plate ID', '')).strip())
                     if label and plate_id and plate_id not in ('nan', ''):
-                        specimens[plate_id][batch_folder].append(label)
+                        # Normalise specimen label to strip TOL- prefix
+                        # so TOL-BGEP-111_A1 and BGEP-111_A1 are the same specimen
+                        norm_label = label[4:] if label.upper().startswith('TOL-') else label
+                        specimens[plate_id][batch_folder].append(norm_label)
             except Exception:
                 pass
 
@@ -216,6 +241,7 @@ def load_umi_data(mbrave_dir, resolved_batches, verbose=False):
         if verbose:
             print(f"  {batch_folder}: processed")
 
+    print(f"  {len(specimens)} plates with specimen data")
     return dict(specimens), dict(controls_neg), dict(controls_pos)
 
 
