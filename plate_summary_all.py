@@ -331,11 +331,24 @@ def load_all_qc_decisions(qc_dir, qc_resolved, verbose=False):
     Load QC decisions from qc_portal (all specimens including FAILED)
     and category numbers from filtered_metadata (PASS/ON_HOLD only but
     has reliable category numbers in all batch formats).
+
+    IMPORTANT: We scan ALL QC batch folders (not just deduped qc_resolved)
+    for the same reason as load_umi_data - plain batch folders (e.g. batch27)
+    may contain QC decisions for plates that don't appear in the split folders
+    (e.g. BGEP plates 111-200 in batch27 plain vs other partners in batch27_1-4).
     Returns dict: specimen_id -> list of {batch, decision, category}
     """
     all_decisions = defaultdict(list)
 
-    for batch_folder in qc_resolved:
+    import os as _os
+    all_qc_batches = sorted([
+        d for d in _os.listdir(qc_dir)
+        if _os.path.isdir(_os.path.join(qc_dir, d))
+        and d.startswith('batch')
+        and 'EXCLUDED' not in d
+    ])
+
+    for batch_folder in all_qc_batches:
         batch_path = os.path.join(qc_dir, batch_folder)
 
         # Decisions from qc_portal (includes FAILED)
