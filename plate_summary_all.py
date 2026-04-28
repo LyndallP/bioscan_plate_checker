@@ -69,6 +69,19 @@ def _extract_partner(plate_id):
     return None
 
 
+def _normalise_plate_id(plate_id):
+    """
+    Strip TOL- prefix so TOL-BGEP-111 and BGEP-111 are treated as the same plate.
+    Some batches use TOL-BGEP-XXX in UMI stats, others use BGEP-XXX for the same plate.
+    """
+    if not plate_id:
+        return plate_id
+    s = str(plate_id).strip()
+    if s.upper().startswith('TOL-'):
+        s = s[4:]  # strip TOL-
+    return s
+
+
 # ── Portal plate list ─────────────────────────────────────────────────────────
 
 def load_portal_plates(portal_csv=None):
@@ -145,9 +158,12 @@ def load_umi_data(mbrave_dir, resolved_batches, verbose=False):
                     continue
                 for _, row in df.iterrows():
                     label    = str(row.get('Label', '')).strip()
-                    plate_id = str(row.get('Sample Plate ID', '')).strip()
+                    plate_id = _normalise_plate_id(str(row.get('Sample Plate ID', '')).strip())
                     if label and plate_id and plate_id not in ('nan', ''):
-                        specimens[plate_id][batch_folder].append(label)
+                        # Also normalise the label (specimen ID) to strip TOL- prefix
+                        # so TOL-BGEP-111_A1 becomes BGEP-111_A1 to match qc_portal pids
+                        norm_label = re.sub(r'^TOL-', '', label) if label.upper().startswith('TOL-') else label
+                        specimens[plate_id][batch_folder].append(norm_label)
             except Exception:
                 pass
 
@@ -159,7 +175,7 @@ def load_umi_data(mbrave_dir, resolved_batches, verbose=False):
                     continue
                 for _, row in df.iterrows():
                     label    = str(row.get('Label', '')).strip()
-                    plate_id = str(row.get('Sample Plate ID', '')).strip()
+                    plate_id = _normalise_plate_id(str(row.get('Sample Plate ID', '')).strip())
                     count    = str(row.get('Count', '0')).strip()
                     if not label or not plate_id or plate_id in ('nan', ''):
                         continue
@@ -182,7 +198,7 @@ def load_umi_data(mbrave_dir, resolved_batches, verbose=False):
                     continue
                 for _, row in df.iterrows():
                     label    = str(row.get('Label', '')).strip()
-                    plate_id = str(row.get('Sample Plate ID', '')).strip()
+                    plate_id = _normalise_plate_id(str(row.get('Sample Plate ID', '')).strip())
                     count    = str(row.get('Count', '0')).strip()
                     if not label or not plate_id or plate_id in ('nan', ''):
                         continue
@@ -533,6 +549,7 @@ def main():
         all_qc_decisions, partner_filter=args.partner,
         verbose=args.verbose)
 
+
     seq   = df_summary[df_summary['n_batches_sequenced'] > 0]
     notseq= df_summary[df_summary['n_batches_sequenced'] == 0]
 
@@ -555,7 +572,7 @@ def main():
     partner_tag = args.partner if args.partner != 'ALL' else 'ALL'
     summary_path = os.path.join(config.RESULTS_DIR,
         f'plate_summary_all_{partner_tag}_{today}.csv')
-    cats_path    = os.path.join(config.RESULTS_DIR,
+    cats_path = os.path.join(config.RESULTS_DIR,
         f'plate_summary_categories_{partner_tag}_{today}.csv')
 
     df_summary.to_csv(summary_path, index=False)
