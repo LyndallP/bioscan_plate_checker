@@ -71,6 +71,13 @@ Files are dated `YYYYMMDD`.
 
 ---
 
+### From `plate_summary_all.py` — comprehensive plate-level QC summary
+
+| File | Type | Level | Description |
+|---|---|---|---|
+| `plate_summary_all_ALL_YYYYMMDD.csv` | CSV | Plate | **Primary plate QC table.** One row per plate across all partners. Uses best QC result per specimen across all repeat sequencings (PASS > ON_HOLD > FAILED). Columns: partner, submit date, n_batches_sequenced, n_specimens, n_controls, pass/on_hold/fail counts and rates, combined rate, positive control well and reads, lysate negative well and reads, random negative SQPP ID and well and reads. Plates never sequenced appear with null sequencing columns. |
+| `plate_summary_categories_ALL_YYYYMMDD.csv` | CSV | Plate | Same as above but with individual category 1–12 counts instead of PASS/ON_HOLD/FAIL buckets. Categories are sourced from `filtered_metadata` (reliable across all batch formats); decisions from `qc_portal` (includes FAILED specimens). |
+
 ### From `repeat_analysis.py` — repeat sequencing (plate level)
 
 | File | Type | Level | Description |
@@ -179,19 +186,22 @@ python3 plate_status_report.py --partner ALL
 # 3. Human-readable pipeline report
 python3 generate_pipeline_report.py
 
-# 4. BOLD upload and BIN URI summary
+# 4. Comprehensive plate-level QC summary (best result per specimen, all controls)
+python3 plate_summary_all.py --partner ALL
+
+# 5. BOLD upload and BIN URI summary
 python3 bold_summary_from_portal.py --partner ALL
 
-# 5. Repeat analysis — plate level
+# 6. Repeat analysis — plate level
 python3 repeat_analysis.py --partner ALL
 
-# 6. Repeat analysis — specimen level with QC decisions per batch
+# 7. Repeat analysis — specimen level with QC decisions per batch
 python3 repeat_analysis_specimens.py --partner ALL
 
-# 7. Missing specimen analysis (~10 mins)
+# 8. Missing specimen analysis (~10 mins)
 python3 missing_specimen_analysis.py --partner ALL
 
-# 8. BOLD workbench analysis (when new workbench files downloaded)
+# 9. BOLD workbench analysis (when new workbench files downloaded)
 python3 bold_workbench_analysis.py --partner ALL --rebuild-cache
 ```
 
@@ -278,6 +288,28 @@ python3 bold_summary_from_portal.py --partner FACE
 ```
 
 ---
+
+### `plate_summary_all.py`
+**Comprehensive plate-level QC summary across all partners and batches.**
+
+One row per plate showing the best QC result per specimen across all repeat sequencings (PASS > ON_HOLD > FAILED). This means if a specimen passed in batch 1 but failed in batch 2, it counts as PASS — giving the true achievable success rate per plate rather than the result of any single sequencing run.
+
+**n_controls** = 96 − n_specimens. For full plates this should be 3 (one positive control, one lysate negative, one random negative). Higher values indicate partial plates where empty wells were assigned control barcodes.
+
+**Control columns reported (from last sequencing batch):**
+- `pos_control_well` / `pos_control_reads` — positive control well position and read count
+- `neg_lysate_well` / `neg_lysate_reads` — lysate negative control (fixed well: G12 for BGEP, H12 for others)
+- `random_neg_sqpp_id` / `random_neg_well` / `random_neg_reads` — random negative control (SQPP specimen ID and random well position; not in portal — only identifiable from UMI stats files)
+
+**Category source:** categories 1–12 come from `filtered_metadata` (reliable number-prefixed descriptions in all batch formats). Decisions come from `qc_portal` which includes FAILED specimens absent from `filtered_metadata`.
+
+Produces two files: PASS/ON_HOLD/FAIL summary, and categories 1–12 breakdown.
+
+```bash
+python3 plate_summary_all.py --partner ALL
+python3 plate_summary_all.py --partner BGEP
+python3 plate_summary_all.py --verbose
+```
 
 ### `repeat_analysis.py`
 Plate-level repeat analysis. Pass rate comparison between first and best sequencing batch.
