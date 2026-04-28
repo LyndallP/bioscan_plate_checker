@@ -88,7 +88,11 @@ def load_portal_plates(portal_csv=None):
     if portal_csv is None:
         portal_csv = config.PORTAL_PLATES_CSV
     df = pd.read_csv(portal_csv, dtype=str)
+    # Normalise plate IDs to strip TOL- prefix for consistent matching
+    df['plate_id'] = df['plate_id'].apply(_normalise_plate_id)
     df['partner'] = df['plate_id'].apply(_extract_partner)
+    # Deduplicate in case stripping creates duplicates (keep first)
+    df = df.drop_duplicates(subset='plate_id', keep='first')
     return df.set_index('plate_id').to_dict('index')
 
 
