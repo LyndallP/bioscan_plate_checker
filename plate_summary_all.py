@@ -262,10 +262,20 @@ def read_filtered_metadata(batch_folder, batch_path):
         well_col = next((c for c in ['Well.Coordinate', 'Well Coordinate',
                                       'well_coordinate'] if c in df.columns), None)
         if well_col:
-            # Newer format: pid is plate ID, well is separate
-            df['full_pid'] = df['pid_meta'] + '_' + df[well_col].str.strip()
+            # Check whether pid already contains the well coordinate
+            # Old format: pid = 'CAMP_131_A1' (already has well)
+            # New format: pid = 'CAMP_211'    (plate only, well is separate)
+            # Detect by checking if pid ends with _[A-H][0-9]{1,2}
+            sample_pid = df['pid_meta'].iloc[0] if len(df) > 0 else ''
+            pid_has_well = bool(re.match(r'.+_[A-H]\d{1,2}$', sample_pid))
+            if pid_has_well:
+                # Old format: pid already includes well, use as-is
+                df['full_pid'] = df['pid_meta']
+            else:
+                # New format: construct full pid from plate pid + well
+                df['full_pid'] = df['pid_meta'] + '_' + df[well_col].str.strip()
         else:
-            # Older format: pid already includes well
+            # No well column at all: use pid as-is
             df['full_pid'] = df['pid_meta']
 
         return df[['full_pid', 'category']].copy()
