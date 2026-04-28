@@ -205,6 +205,10 @@ def load_umi_data(mbrave_dir, resolved_batches, verbose=False):
 # ── QC decisions ──────────────────────────────────────────────────────────────
 
 def read_qc_portal(batch_folder, batch_path):
+    """
+    Read qc_portal for PASS/ON_HOLD/FAILED decisions (includes FAILed specimens).
+    Returns DataFrame: pid | decision
+    """
     files = glob.glob(os.path.join(batch_path, 'qc_portal_batch*.csv'))
     if not files:
         return pd.DataFrame()
@@ -213,40 +217,83 @@ def read_qc_portal(batch_folder, batch_path):
         first_val = str(peek.iloc[0, 0]).strip().strip('"')
         if _PID_RE.match(first_val) and first_val.lower() != 'pid':
             df = safe_read_csv(files[0], header=None, dtype=str)
-            df = df.iloc[:, :3].copy()
-            df.columns = ['pid', 'decision', 'description']
+            df = df.iloc[:, :2].copy()
+            df.columns = ['pid', 'decision']
         else:
             df = safe_read_csv(files[0], dtype=str)
             df.columns = [c.strip().strip('"') for c in df.columns]
-            df = df.rename(columns={'category_decision': 'decision',
-                                    'category_explanation': 'description'})
-            df = df[['pid', 'decision', 'description']].copy()
+            df = df.rename(columns={'category_decision': 'decision'})
+            df = df[['pid', 'decision']].copy()
         for col in df.columns:
             df[col] = df[col].str.strip().str.strip('"')
         df = df[df['pid'].notna() & (df['pid'] != 'pid')]
-        df['category'] = df['description'].str.extract(r'^(\d+),').fillna('')
         return df
     except Exception:
         return pd.DataFrame()
 
 
+def read_filtered_metadata(batch_folder, batch_path):
+    """
+    Read filtered_metadata for category numbers (always has number-prefixed
+    descriptions regardless of batch format). FAILed specimens not present here.
+    Returns DataFrame: pid | category
+    """
+    files = glob.glob(os.path.join(batch_path, 'filtered_metadata_batch*.csv'))
+    if not files:
+        return pd.DataFrame()
+    try:
+        df = safe_read_csv(files[0], dtype=str)
+        # Handle both column name variants
+        if 'pid' not in df.columns:
+            df.columns = [c.strip().strip('"') for c in df.columns]
+        desc_col = next((c for c in ['category_explanation', 'description',
+                                      'bioscan_qc_category'] if c in df.columns), None)
+        if desc_col is None:
+            return pd.DataFrame()
+        df['category'] = df[desc_col].str.strip().str.extract(r'^(\d+)[, ]').fillna('')
+        df['pid'] = df['pid'].str.strip().str.strip('"')
+        return df[['pid', 'category']].copy()
+    except Exception:
+        return pd.DataFrame()
+
+
 def load_all_qc_decisions(qc_dir, qc_resolved, verbose=False):
+    """
+    Load QC decisions from qc_portal (all specimens including FAILED)
+    and category numbers from filtered_metadata (PASS/ON_HOLD only but
+    has reliable category numbers in all batch formats).
+    Returns dict: specimen_id -> list of {batch, decision, category}
+    """
     all_decisions = defaultdict(list)
+
     for batch_folder in qc_resolved:
         batch_path = os.path.join(qc_dir, batch_folder)
-        df = read_qc_portal(batch_folder, batch_path)
-        if df.empty:
+
+        # Decisions from qc_portal (includes FAILED)
+        portal_df = read_qc_portal(batch_folder, batch_path)
+        if portal_df.empty:
             continue
-        for _, row in df.iterrows():
+
+        # Categories from filtered_metadata (reliable category numbers)
+        meta_df = read_filtered_metadata(batch_folder, batch_path)
+        cat_lookup = {}
+        if not meta_df.empty:
+            cat_lookup = dict(zip(meta_df['pid'], meta_df['category']))
+
+        for _, row in portal_df.iterrows():
             pid = str(row['pid']).strip()
+            dec = str(row['decision']).strip()
             if pid:
                 all_decisions[pid].append({
                     'batch':    batch_folder,
-                    'decision': str(row['decision']).strip(),
-                    'category': str(row['category']).strip(),
+                    'decision': dec,
+                    'category': cat_lookup.get(pid, ''),
                 })
+
         if verbose:
-            print(f"  {batch_folder}: {len(df)} QC records")
+            print(f"  {batch_folder}: {len(portal_df)} QC records, "
+                  f"{len(cat_lookup)} with category")
+
     return dict(all_decisions)
 
 
