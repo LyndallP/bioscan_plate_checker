@@ -164,10 +164,7 @@ def load_umi_data(mbrave_dir, resolved_batches, verbose=False):
                     label    = str(row.get('Label', '')).strip()
                     plate_id = _normalise_plate_id(str(row.get('Sample Plate ID', '')).strip())
                     if label and plate_id and plate_id not in ('nan', ''):
-                        # Also normalise the label (specimen ID) to strip TOL- prefix
-                        # so TOL-BGEP-111_A1 becomes BGEP-111_A1 to match qc_portal pids
-                        norm_label = re.sub(r'^TOL-', '', label) if label.upper().startswith('TOL-') else label
-                        specimens[plate_id][batch_folder].append(norm_label)
+                        specimens[plate_id][batch_folder].append(label)
             except Exception:
                 pass
 
@@ -335,6 +332,15 @@ def load_all_qc_decisions(qc_dir, qc_resolved, verbose=False):
                     'decision': dec,
                     'category': cat_lookup.get(pid, ''),
                 })
+                # Also store under normalised pid (TOL- stripped) so
+                # UMI specimen labels that kept TOL- prefix can still match
+                norm_pid = re.sub(r'^TOL-', '', pid) if pid.upper().startswith('TOL-') else pid
+                if norm_pid != pid:
+                    all_decisions[norm_pid].append({
+                        'batch':    batch_folder,
+                        'decision': dec,
+                        'category': cat_lookup.get(pid, ''),
+                    })
 
         if verbose:
             print(f"  {batch_folder}: {len(portal_df)} QC records, "
