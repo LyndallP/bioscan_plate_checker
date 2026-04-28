@@ -75,8 +75,8 @@ Files are dated `YYYYMMDD`.
 
 | File | Type | Level | Description |
 |---|---|---|---|
-| `plate_summary_all_ALL_YYYYMMDD.csv` | CSV | Plate | **Primary plate QC table.** One row per plate across all partners. Uses best QC result per specimen across all repeat sequencings (PASS > ON_HOLD > FAILED). Columns: partner, submit date, n_batches_sequenced, n_specimens, n_controls, pass/on_hold/fail counts and rates, combined rate, positive control well and reads, lysate negative well and reads, random negative SQPP ID and well and reads. Plates never sequenced appear with null sequencing columns. |
-| `plate_summary_categories_ALL_YYYYMMDD.csv` | CSV | Plate | Same as above but with individual category 1–12 counts instead of PASS/ON_HOLD/FAIL buckets. Categories are sourced from `filtered_metadata` (reliable across all batch formats); decisions from `qc_portal` (includes FAILED specimens). |
+| `plate_summary_all_ALL_YYYYMMDD.csv` | CSV | Plate | **Primary plate QC table.** One row per plate across all partners. Uses best QC result per specimen across all sequencing batches — plain and split batch QC files are both used, so if a specimen passed in any batch it is counted as PASS. Columns: partner, submit date, n_batches_sequenced, n_specimens, n_controls, pass/on_hold/fail counts and rates, combined rate, positive control well and reads, lysate negative well and reads, random negative SQPP ID and well and reads. Plates never sequenced appear with null sequencing columns. |
+| `plate_summary_categories_ALL_YYYYMMDD.csv` | CSV | Plate | Same as above but with individual category 1–12 counts instead of PASS/ON_HOLD/FAIL buckets. Categories sourced from `filtered_metadata`; decisions from `qc_portal` (includes FAILED specimens). |
 
 ### From `repeat_analysis.py` — repeat sequencing (plate level)
 
@@ -303,7 +303,7 @@ One row per plate showing the best QC result per specimen across all repeat sequ
 
 **Category source:** categories 1–12 come from `filtered_metadata` (reliable number-prefixed descriptions in all batch formats). Decisions come from `qc_portal` which includes FAILED specimens absent from `filtered_metadata`.
 
-Produces two files: PASS/ON_HOLD/FAIL summary, and categories 1–12 breakdown.
+Produces two output files: PASS/ON_HOLD/FAIL summary, and categories 1–12 breakdown.
 
 ```bash
 python3 plate_summary_all.py --partner ALL
@@ -423,6 +423,6 @@ bsub < run_bold_check.sh
 - **57 specimens** absent from BOLD workbench entirely — all BGE partners; edge well positions suggest quality-based removal
 - **Portal/BOLD concordance: 100%** — all 272,005 specimens confirmed on BOLD
 - **21,780 specimens** sequenced more than once; 6,005 improved from FAILED → PASS; 4,351 persistently FAILED
-- **248 plates** sequenced more than once; average pass rate improvement 6.1%; TOL-BGEP-010 most improved (6.5% → 98.9%)
+- **252 plates** sequenced more than once; average pass rate improvement 6.1% (first→last batch); best-batch selection recommended over most-recent-batch
 - **6,208 specimens** with reads but no consensus — concentrated in BGKU and WALW (aquatic invertebrates, taxon-specific assembly failure)
 - **Cat3 = 0** — no demultiplexing failures detected across any batch
