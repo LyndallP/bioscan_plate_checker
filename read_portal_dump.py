@@ -115,6 +115,14 @@ def fetch_portal_dump(output_path=None, verbose=True):
 
     tol_cmd = ' '.join(cmd) + f' > {output_path}'
 
+    # Find the tol executable directly in the conda env
+    # so we don't need to activate conda inside bsub
+    conda_tol = (
+        '/software/treeoflife/conda/users/envs/team222/lp20/bioscan-ops/bin/tol'
+    )
+    # Build the tol command using full path to executable
+    tol_cmd_full = tol_cmd.replace('tol data', f'{conda_tol} data', 1)
+
     bsub_cmd = [
         'bsub',
         '-J', 'bioscan_portal_dump',
@@ -124,11 +132,11 @@ def fetch_portal_dump(output_path=None, verbose=True):
         '-R', 'select[mem>8000] rusage[mem=8000]',
         '-q', 'normal',
         '/bin/bash', '-c',
-        f'source activate bioscan-ops && {tol_cmd}',
+        tol_cmd_full,
     ]
 
     if verbose:
-        print(f"  tol command: {tol_cmd}")
+        print(f"  tol command: {tol_cmd_full}")
         print(f"  bsub command: {chr(32).join(bsub_cmd)}")
         print(f"  stdout log:  {log_path}")
         print(f"  stderr log:  {err_path}")
