@@ -1,48 +1,157 @@
 """
 read_portal_dump.py
 
-Reads the pre-exported portal dump TSV (sts_manifests_YYYYMMDD.tsv) and
-builds a plate-level summary CSV used by plate_status_report.py.
+Fetches a fresh BIOSCAN specimen dump from the ToL portal using the `tol`
+CLI, saves it as a dated TSV, then builds a plate-level summary CSV used
+by plate_status_report.py and the rest of the pipeline.
 
-This replaces live portal queries which take ~2 hours for 350k+ samples.
+The dated dump is saved alongside all other pipeline outputs so that every
+reporting run has a fully reproducible, auditable input file.
 
-Input columns used:
-    col 1  : sts_specimen.id  — specimen+well ID e.g. "BGEP-161_A1"
-    col 25 : bold_nuc         — sequence uploaded to BOLD (non-empty = uploaded)
-    col 59 : sts_submit_date  — submission date
+Fetch command used:
+    tol data --source=portal --operation=list --type=sample \\
+        --filter='{"and_":{"sts_project":{"in_list":{"value":["BIOSCAN"],"negate":false}}}}' \\
+        --fields=sts_rackid,sts_specimen.id,bold_nuc,sts_submit_date,\\
+                 bold_bold_recordset_code_arr,bold_bin_uri,sts_species.sts_scientific_name \\
+        --output=tsv
+
+Input columns used from dump:
+    sts_specimen.id               — specimen+well ID e.g. "BGEP-161_A1"
+    bold_nuc                      — sequence uploaded to BOLD (non-empty = uploaded)
+    sts_submit_date               — plate submission date
+    bold_bin_uri                  — BIN URI if assigned
+    bold_bold_recordset_code_arr  — partner code (supplementary cross-check)
+    sts_species.sts_scientific_name — "unidentified" = specimen present,
+                                      "blank" = empty well (partial plate / control)
 
 Partner is extracted from plate ID prefix:
-    HIRW_001     -> HIRW
-    BGEP-161     -> BGEP
-    TOL-BGEP-001 -> BGEP
+    HIRW_001      -> HIRW
+    BGEP-161      -> BGEP
+    TOL-BGEP-001  -> BGEP
     MOZZ00000609A -> MOZZ
 
 Usage:
-    # Build the plate summary from the dump (run once)
-    python3 read_portal_dump.py --input /path/to/sts_manifests_20260408.tsv
+    # Fetch fresh dump from portal AND build plate summary (recommended)
+    python3 read_portal_dump.py --fetch
 
-    # Specify output path
-    python3 read_portal_dump.py --input /path/to/sts_manifests_20260408.tsv \\
-                                --output /path/to/portal_plates.csv
+    # Build plate summary from existing dump (faster, no portal query)
+    python3 read_portal_dump.py --input /path/to/sts_manifests_20260501.tsv
+
+    # Fetch and save to custom path
+    python3 read_portal_dump.py --fetch --output /path/to/portal_plates.csv
 """
 
 import argparse
 import os
 import re
+import subprocess
 import datetime
 import pandas as pd
-from collections import defaultdict
 
 import config
 from utils import extract_plate_from_pid
 
-# Default path to the portal dump
-DEFAULT_DUMP = "/lustre/scratch126/tol/teams/lawniczak/projects/bioscan/100k_paper/output/sts_manifests_20260408.tsv"
-
-# Column names we need
+# Column names from portal dump
 _SPECIMEN_COL  = 'sts_specimen.id'
 _BOLD_COL      = 'bold_nuc'
 _SUBMIT_COL    = 'sts_submit_date'
+_BIN_COL       = 'bold_bin_uri'
+_PARTNER_COL   = 'bold_bold_recordset_code_arr'  # supplementary only
+_SPECIES_COL   = 'sts_species.sts_scientific_name'
+
+# Portal fetch settings
+_PORTAL_FILTER = (
+    '{"and_":{"sts_project":{"in_list":{"value":["BIOSCAN"],"negate":false}}}}'
+)
+_PORTAL_FIELDS = ','.join([
+    'sts_rackid',
+    'sts_specimen.id',
+    'bold_nuc',
+    'sts_submit_date',
+    'bold_bold_recordset_code_arr',
+    'bold_bin_uri',
+    'sts_species.sts_scientific_name',
+])
+
+
+
+def fetch_portal_dump(output_path=None, verbose=True):
+    """
+    Fetch a fresh BIOSCAN specimen dump from the ToL portal using the
+    `tol` CLI and save it as a dated TSV in the results directory.
+
+    Returns the path to the saved TSV.
+
+    The `tol` CLI must be available on PATH (bioscan-ops conda env on farm22).
+    The query takes ~2 hours for ~470k specimens — run inside a tmux session.
+    """
+    today = datetime.datetime.now().strftime('%Y%m%d')
+
+    if output_path is None:
+        os.makedirs(config.RESULTS_DIR, exist_ok=True)
+        output_path = os.path.join(
+            config.RESULTS_DIR,
+            f'sts_manifests_{today}.tsv'
+        )
+
+    if verbose:
+        print(f"Fetching BIOSCAN portal dump...")
+        print(f"  Output: {output_path}")
+        print(f"  This takes ~2 hours. Run in tmux.")
+        print()
+
+    cmd = [
+        'tol', 'data',
+        '--source=portal',
+        '--operation=list',
+        '--type=sample',
+        f'--filter={_PORTAL_FILTER}',
+        f'--fields={_PORTAL_FIELDS}',
+        '--output=tsv',
+    ]
+
+    log_path = output_path.replace('.tsv', '.log')
+    err_path = output_path.replace('.tsv', '.err')
+
+    tol_cmd = ' '.join(cmd) + f' > {output_path}'
+
+    bsub_cmd = [
+        'bsub',
+        '-J', 'bioscan_portal_dump',
+        '-o', log_path,
+        '-e', err_path,
+        '-M', '8000',
+        '-R', 'select[mem>8000] rusage[mem=8000]',
+        '-q', 'normal',
+        '/bin/bash', '-c',
+        f'source activate bioscan-ops && {tol_cmd}',
+    ]
+
+    if verbose:
+        print(f"  tol command: {tol_cmd}")
+        print(f"  bsub command: {chr(32).join(bsub_cmd)}")
+        print(f"  stdout log:  {log_path}")
+        print(f"  stderr log:  {err_path}")
+        print()
+
+    result = subprocess.run(bsub_cmd, capture_output=True, text=True)
+
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"bsub submission failed (exit code {result.returncode}):\n"
+            f"{result.stderr}"
+        )
+
+    if verbose:
+        print(f"  Job submitted: {result.stdout.strip()}")
+        print(f"  Monitor with: bjobs -J bioscan_portal_dump")
+        print(f"  Output will appear at: {output_path}")
+        print()
+        print(f"  Once complete, run:")
+        print(f"    python3 read_portal_dump.py --input {output_path}")
+
+    # Return the expected output path (file won't exist yet — job is queued)
+    return output_path
 
 
 def extract_partner_from_plate(plate_id):
@@ -93,24 +202,51 @@ def build_portal_plate_summary(dump_path, output_path, verbose=True):
     """
     print(f"Reading portal dump: {dump_path}")
 
-    # Read only the columns we need
+    # Read columns we need — handle missing columns gracefully
+    # (older dumps may not have bin_uri or species columns)
+    all_cols = [_SPECIMEN_COL, _BOLD_COL, _SUBMIT_COL, _BIN_COL, _SPECIES_COL]
+    peek = pd.read_csv(dump_path, sep='\t', dtype=str, nrows=0)
+    available = [c for c in all_cols if c in peek.columns]
     df = pd.read_csv(dump_path, sep='\t', dtype=str,
-                     usecols=[_SPECIMEN_COL, _BOLD_COL, _SUBMIT_COL],
-                     low_memory=False)
+                     usecols=available, low_memory=False)
+    # Add missing optional columns as empty
+    for col in all_cols:
+        if col not in df.columns:
+            df[col] = None
 
     print(f"  {len(df)} rows loaded")
 
     # Extract plate ID from specimen ID
     df['plate_id'] = df[_SPECIMEN_COL].apply(extract_plate_from_pid)
 
-    # Remove controls and blanks
+    # Remove controls and blank wells
+    # "blank" in sts_species.sts_scientific_name = empty well (partial plate,
+    # positive/negative control well). These should not count as specimens.
+    # Note: the random negative SQPP specimen is assigned AFTER portal submission
+    # so it may appear as "unidentified" here — that is correct behaviour.
     df = df[~df['plate_id'].apply(is_control_plate)]
     df = df[df['plate_id'].notna()]
     df = df[df['plate_id'] != 'NA']
     df = df[df['plate_id'] != 'None']
+    if _SPECIES_COL in df.columns:
+        n_blank_total = (df[_SPECIES_COL].str.lower() == 'blank').sum()
+        df = df[df[_SPECIES_COL].str.lower() != 'blank']
+        print(f"  Removed {n_blank_total} blank wells (empty/control wells from portal)")
 
-    # Extract partner
-    df['partner'] = df['plate_id'].apply(extract_partner_from_plate)
+    # Partner: use bold_bold_recordset_code_arr from portal if available
+    # This is correct for all partners including MOZZ plates which belong to
+    # various different partners and cannot be identified from the plate ID alone.
+    # Fall back to extracting from plate ID only if the portal field is missing.
+    if _PARTNER_COL in df.columns:
+        df['partner'] = df[_PARTNER_COL].str.strip().replace({'None': None, '': None})
+        # Fill blanks from plate ID as fallback
+        missing = df['partner'].isna()
+        if missing.any():
+            df.loc[missing, 'partner'] = (
+                df.loc[missing, 'plate_id'].apply(extract_partner_from_plate)
+            )
+    else:
+        df['partner'] = df['plate_id'].apply(extract_partner_from_plate)
 
     # BOLD: True if bold_nuc is non-empty and not 'None'
     df['bold_uploaded'] = (
@@ -118,6 +254,15 @@ def build_portal_plate_summary(dump_path, output_path, verbose=True):
         (df[_BOLD_COL] != 'None') &
         (df[_BOLD_COL].str.strip() != '')
     )
+    # BIN: True if bold_bin_uri is populated
+    if _BIN_COL in df.columns:
+        df['has_bin'] = (
+            df[_BIN_COL].notna() &
+            (df[_BIN_COL] != 'None') &
+            (df[_BIN_COL].str.strip() != '')
+        )
+    else:
+        df['has_bin'] = False
 
     # Submit date: keep date part only
     df['submit_date'] = df[_SUBMIT_COL].str[:10].replace('None', None)
@@ -126,17 +271,29 @@ def build_portal_plate_summary(dump_path, output_path, verbose=True):
     print("  Aggregating to plate level...")
     plate_rows = []
     for plate_id, grp in df.groupby('plate_id'):
-        partner = grp['partner'].dropna().iloc[0] if grp['partner'].notna().any() else None
+        # Use most common partner value — portal field may have slight variation
+        partner_vals = grp['partner'].dropna()
+        partner = partner_vals.mode().iloc[0] if len(partner_vals) > 0 else None
         dates = grp['submit_date'].dropna()
         dates = dates[dates != 'None']
         submit_date = sorted(dates)[0] if len(dates) > 0 else None
-        bold_uploaded = bool(grp['bold_uploaded'].any())
+        bold_uploaded  = bool(grp['bold_uploaded'].any())
+        n_with_bin     = int(grp['has_bin'].sum()) if 'has_bin' in grp else 0
+        # Species: "blank" = empty well, "unidentified" = specimen present
+        n_blank = 0
+        n_specimen = 0
+        if _SPECIES_COL in grp.columns:
+            n_blank    = int((grp[_SPECIES_COL].str.lower() == 'blank').sum())
+            n_specimen = int((grp[_SPECIES_COL].str.lower() == 'unidentified').sum())
         plate_rows.append({
             'plate_id':       plate_id,
             'partner':        partner,
             'submit_date':    submit_date,
             'bold_uploaded':  bold_uploaded,
             'n_wells_portal': len(grp),
+            'n_with_bin':     n_with_bin,
+            'n_blank_wells':  n_blank,
+            'n_specimen_wells': n_specimen,
         })
 
     result = pd.DataFrame(plate_rows).sort_values('plate_id').reset_index(drop=True)
@@ -162,7 +319,7 @@ def load_portal_plate_summary(csv_path):
     if not os.path.exists(csv_path):
         raise FileNotFoundError(
             f"Portal plate summary not found: {csv_path}\n"
-            f"Run: python3 read_portal_dump.py --input {DEFAULT_DUMP}"
+            f"Run: python3 read_portal_dump.py --fetch"
         )
     df = pd.read_csv(csv_path, dtype=str)
     df['bold_uploaded'] = df['bold_uploaded'].map(
@@ -174,19 +331,42 @@ def load_portal_plate_summary(csv_path):
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Build plate summary from portal dump TSV'
+        description='Fetch portal dump and build plate summary CSV'
     )
-    parser.add_argument('--input', default=DEFAULT_DUMP,
-        help=f'Path to portal dump TSV (default: {DEFAULT_DUMP})')
+    parser.add_argument('--fetch', action='store_true',
+        help='Fetch a fresh dump from the portal (takes ~2 hours, run in tmux)')
+    parser.add_argument('--input', default=None,
+        help='Path to existing portal dump TSV (skip fetch)')
     parser.add_argument('--output', default=None,
         help='Output CSV path (default: RESULTS_DIR/portal_plates_from_dump.csv)')
     args = parser.parse_args()
 
+    os.makedirs(config.RESULTS_DIR, exist_ok=True)
+
+    # Step 1: get the dump TSV
+    if args.fetch:
+        dump_path = fetch_portal_dump(output_path=args.input)
+    elif args.input:
+        dump_path = args.input
+    else:
+        # Fall back to most recent sts_manifests file in results dir
+        import glob
+        candidates = sorted(glob.glob(
+            os.path.join(config.RESULTS_DIR, 'sts_manifests_*.tsv')
+        ))
+        if not candidates:
+            parser.error(
+                'No portal dump found. Run with --fetch to download, '
+                'or provide --input /path/to/sts_manifests_YYYYMMDD.tsv'
+            )
+        dump_path = candidates[-1]
+        print(f"Using most recent dump: {dump_path}")
+
+    # Step 2: build plate summary
     if args.output is None:
-        os.makedirs(config.RESULTS_DIR, exist_ok=True)
         args.output = os.path.join(config.RESULTS_DIR, 'portal_plates_from_dump.csv')
 
-    build_portal_plate_summary(args.input, args.output)
+    build_portal_plate_summary(dump_path, args.output)
 
 
 if __name__ == '__main__':
