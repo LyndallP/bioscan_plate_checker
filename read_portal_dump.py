@@ -363,6 +363,14 @@ def main():
         print(f"Using most recent dump: {dump_path}")
 
     # Step 2: build plate summary
+    # If we just submitted a fetch job, stop here — the TSV doesn't exist yet.
+    # Re-run with --input once the job completes.
+    if args.fetch:
+        print()
+        print("Job submitted. Once complete (~2 hours), run:")
+        print(f"  python3 read_portal_dump.py --input {dump_path}")
+        return
+
     if args.output is None:
         args.output = os.path.join(config.RESULTS_DIR, 'portal_plates_from_dump.csv')
 
