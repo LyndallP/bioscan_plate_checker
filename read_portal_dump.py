@@ -78,30 +78,22 @@ _PORTAL_FIELDS = ','.join([
 def fetch_portal_dump(output_path=None, verbose=True):
     """
     Fetch a fresh BIOSCAN specimen dump from the ToL portal using the
-    `tol` CLI and save it as a dated TSV in the results directory.
+    tol CLI and save as a dated TSV in the results directory.
 
-    Returns the path to the saved TSV.
-
-    The `tol` CLI must be available on PATH (bioscan-ops conda env on farm22).
-    The query takes ~2 hours for ~470k specimens — run inside a tmux session.
+    Takes ~2 hours. Run inside tmux so it survives connection drops:
+        tmux new -s portal_dump
+        python3 read_portal_dump.py --fetch
+        Ctrl+B then D to detach; tmux attach -s portal_dump to reattach
     """
     today = datetime.datetime.now().strftime('%Y%m%d')
-
     if output_path is None:
         os.makedirs(config.RESULTS_DIR, exist_ok=True)
-        output_path = os.path.join(
-            config.RESULTS_DIR,
-            f'sts_manifests_{today}.tsv'
-        )
+        output_path = os.path.join(config.RESULTS_DIR, f'sts_manifests_{today}.tsv')
 
-    if verbose:
-        print(f"Fetching BIOSCAN portal dump...")
-        print(f"  Output: {output_path}")
-        print(f"  This takes ~2 hours. Run in tmux.")
-        print()
+    tol_exe = '/software/treeoflife/conda/users/envs/team222/lp20/bioscan-ops/bin/tol'
 
     cmd = [
-        'tol', 'data',
+        tol_exe, 'data',
         '--source=portal',
         '--operation=list',
         '--type=sample',
@@ -110,57 +102,30 @@ def fetch_portal_dump(output_path=None, verbose=True):
         '--output=tsv',
     ]
 
-    log_path = output_path.replace('.tsv', '.log')
-    err_path = output_path.replace('.tsv', '.err')
-
-    tol_cmd = ' '.join(cmd) + f' > {output_path}'
-
-    # Find the tol executable directly in the conda env
-    # so we don't need to activate conda inside bsub
-    conda_tol = (
-        '/software/treeoflife/conda/users/envs/team222/lp20/bioscan-ops/bin/tol'
-    )
-    # Build the tol command using full path to executable
-    tol_cmd_full = tol_cmd.replace('tol data', f'{conda_tol} data', 1)
-
-    bsub_cmd = [
-        'bsub',
-        '-J', 'bioscan_portal_dump',
-        '-o', log_path,
-        '-e', err_path,
-        '-M', '8000',
-        '-R', 'select[mem>8000] rusage[mem=8000]',
-        '-q', 'normal',
-        '/bin/bash', '-c',
-        tol_cmd_full,
-    ]
-
     if verbose:
-        print(f"  tol command: {tol_cmd_full}")
-        print(f"  bsub command: {chr(32).join(bsub_cmd)}")
-        print(f"  stdout log:  {log_path}")
-        print(f"  stderr log:  {err_path}")
+        print(f"Fetching BIOSCAN portal dump...")
+        print(f"  Output: {output_path}")
+        print(f"  Command: {' '.join(cmd)}")
         print()
 
-    result = subprocess.run(bsub_cmd, capture_output=True, text=True)
+    with open(output_path, 'w') as fout:
+        result = subprocess.run(cmd, stdout=fout, stderr=subprocess.PIPE, text=True)
 
     if result.returncode != 0:
         raise RuntimeError(
-            f"bsub submission failed (exit code {result.returncode}):\n"
-            f"{result.stderr}"
+            f"Portal fetch failed (exit code {result.returncode}):\n{result.stderr}"
         )
 
+    size = os.path.getsize(output_path)
+    if size < 1000:
+        raise RuntimeError(f"Portal dump looks empty ({size} bytes): {output_path}")
+
     if verbose:
-        print(f"  Job submitted: {result.stdout.strip()}")
-        print(f"  Monitor with: bjobs -J bioscan_portal_dump")
-        print(f"  Output will appear at: {output_path}")
-        print()
-        print(f"  Once complete, run:")
-        print(f"    python3 read_portal_dump.py --input {output_path}")
+        print(f"  Done. {size / 1024 / 1024:.1f} MB saved to: {output_path}")
+        if result.stderr:
+            print(f"  Warnings: {result.stderr[:300]}")
 
-    # Return the expected output path (file won't exist yet — job is queued)
     return output_path
-
 
 def extract_partner_from_plate(plate_id):
     """
@@ -371,13 +336,7 @@ def main():
         print(f"Using most recent dump: {dump_path}")
 
     # Step 2: build plate summary
-    # If we just submitted a fetch job, stop here — the TSV doesn't exist yet.
-    # Re-run with --input once the job completes.
-    if args.fetch:
-        print()
-        print("Job submitted. Once complete (~2 hours), run:")
-        print(f"  python3 read_portal_dump.py --input {dump_path}")
-        return
+    # --fetch runs synchronously so the file exists now
 
     if args.output is None:
         args.output = os.path.join(config.RESULTS_DIR, 'portal_plates_from_dump.csv')
