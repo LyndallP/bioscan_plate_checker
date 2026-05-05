@@ -29,7 +29,7 @@ import re
 import pandas as pd
 
 import config
-from utils import extract_plate_from_pid, matches_partner
+from utils import extract_plate_from_pid, matches_partner, is_bge_plate
 
 
 # ── Column names in portal dump ───────────────────────────────────────────────
@@ -81,6 +81,13 @@ def load_portal_dump(dump_path, partner=None):
     df = df[~df[_SPECIMEN_COL].apply(is_control)]
     df = df[df['plate_id'].notna()]
     df = df[~df['plate_id'].isin(['NA', 'None', ''])]
+
+    # Exclude BGE partner plates (BGEP, BGEG, BGKU, BGPT) including TOL- variants
+    n_before = len(df)
+    df = df[~df['plate_id'].apply(is_bge_plate)]
+    n_removed = n_before - len(df)
+    if n_removed > 0:
+        print(f"  Excluded {n_removed} BGE partner rows (BGEP/BGEG/BGKU/BGPT)")
 
     # Fix None strings
     for col in [_BOLD_NUC_COL, _UPLOAD_DATE_COL, _BIN_URI_COL, _BIN_DATE_COL]:

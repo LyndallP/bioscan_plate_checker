@@ -13,7 +13,8 @@ from collections import defaultdict
 
 import config
 from utils import (resolve_batches, find_file_in_batch, extract_plate_from_pid,
-                   safe_read_csv, batch_sort_key, matches_partner, classify_folder)
+                   safe_read_csv, batch_sort_key, matches_partner, classify_folder,
+                   is_bge_plate)
 
 
 def get_plates_from_batch(batch_folder, batch_path, verbose=False):
@@ -83,6 +84,8 @@ def build_mbrave_plate_index(mbrave_dir=None, partner=None, verbose=False):
         batch_path = os.path.join(mbrave_dir, batch_folder)
         plates = get_plates_from_batch(batch_folder, batch_path, verbose=verbose)
         for plate in plates:
+            if is_bge_plate(plate):
+                continue
             if matches_partner(plate, partner):
                 plate_to_batches[plate].append(batch_folder)
 

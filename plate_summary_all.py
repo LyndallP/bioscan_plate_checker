@@ -40,7 +40,7 @@ from collections import defaultdict
 
 import config
 from utils import (resolve_batches, build_batch_cross_map,
-                   batch_sort_key, matches_partner, safe_read_csv)
+                   batch_sort_key, matches_partner, safe_read_csv, is_bge_plate)
 
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -90,6 +90,8 @@ def load_portal_plates(portal_csv=None):
     df = pd.read_csv(portal_csv, dtype=str)
     # Normalise plate IDs to strip TOL- prefix for consistent matching
     df['plate_id'] = df['plate_id'].apply(_normalise_plate_id)
+    # Exclude BGE partner plates (BGEP, BGEG, BGKU, BGPT)
+    df = df[~df['plate_id'].apply(is_bge_plate)]
     df['partner'] = df['plate_id'].apply(_extract_partner)
     # Deduplicate in case stripping creates duplicates (keep first)
     df = df.drop_duplicates(subset='plate_id', keep='first')
@@ -189,7 +191,8 @@ def load_umi_data(mbrave_dir, resolved_batches, verbose=False):
                         # Normalise specimen label to strip TOL- prefix
                         # so TOL-BGEP-111_A1 and BGEP-111_A1 are the same specimen
                         norm_label = label[4:] if label.upper().startswith('TOL-') else label
-                        specimens[plate_id][batch_folder].append(norm_label)
+                        if not is_bge_plate(plate_id):
+                            specimens[plate_id][batch_folder].append(norm_label)
             except Exception:
                 pass
 
@@ -204,6 +207,8 @@ def load_umi_data(mbrave_dir, resolved_batches, verbose=False):
                     plate_id = _normalise_plate_id(str(row.get('Sample Plate ID', '')).strip())
                     count    = str(row.get('Count', '0')).strip()
                     if not label or not plate_id or plate_id in ('nan', ''):
+                        continue
+                    if is_bge_plate(plate_id):
                         continue
                     ctrl_type, well, sqpp_id = _parse_neg_control(label)
                     controls_neg[plate_id][batch_folder].append({
@@ -227,6 +232,8 @@ def load_umi_data(mbrave_dir, resolved_batches, verbose=False):
                     plate_id = _normalise_plate_id(str(row.get('Sample Plate ID', '')).strip())
                     count    = str(row.get('Count', '0')).strip()
                     if not label or not plate_id or plate_id in ('nan', ''):
+                        continue
+                    if is_bge_plate(plate_id):
                         continue
                     well, sqpp_id = _parse_pos_control(label)
                     controls_pos[plate_id][batch_folder].append({
@@ -370,7 +377,7 @@ def load_all_qc_decisions(qc_dir, qc_resolved, verbose=False):
         for _, row in portal_df.iterrows():
             pid = str(row['pid']).strip()
             dec = str(row['decision']).strip()
-            if pid:
+            if pid and not is_bge_plate(pid):
                 all_decisions[pid].append({
                     'batch':    batch_folder,
                     'decision': dec,

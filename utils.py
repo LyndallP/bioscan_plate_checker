@@ -214,6 +214,26 @@ def matches_partner(plate_id, partner):
             pid.startswith('TOL-' + p + '-'))
 
 
+def is_bge_plate(plate_id):
+    """
+    Return True if plate_id belongs to a BGE partner (BGEP, BGEG, BGKU, BGPT).
+
+    Handles both plain format (BGEP-161) and TOL-prefixed (TOL-BGEP-161).
+    Importing config here (not at module top) avoids circular imports.
+    """
+    if not plate_id:
+        return False
+    from config import BGE_PARTNER_CODES
+    pid = str(plate_id).upper()
+    # Strip TOL- prefix for consistent matching
+    if pid.startswith('TOL-'):
+        pid = pid[4:]
+    for code in BGE_PARTNER_CODES:
+        if pid.startswith(code + '-') or pid.startswith(code + '_'):
+            return True
+    return False
+
+
 # ── Safe file reading ─────────────────────────────────────────────────────────
 
 def safe_read_csv(filepath, **kwargs):

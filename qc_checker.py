@@ -26,7 +26,7 @@ from collections import defaultdict
 import config
 from utils import (build_batch_cross_map, find_file_in_batch,
                    normalise_plate_id, safe_read_csv,
-                   batch_sort_key, matches_partner)
+                   batch_sort_key, matches_partner, is_bge_plate)
 
 _DECISION_MAP = {'YES': 'PASS', 'NO': 'FAIL', 'ON_HOLD': 'ON_HOLD'}
 _STATUS_RANK  = {'PASS': 3, 'ON_HOLD': 2, 'FAIL': 1, 'UNKNOWN': 0}
@@ -130,6 +130,13 @@ def build_qc_plate_index(mbrave_dir=None, qc_dir=None, partner=None, verbose=Fal
         return {}, mbrave_to_qc, qc_to_mbrave, issues, batches_no_qc
 
     combined = pd.concat(all_records, ignore_index=True)
+
+    # Exclude BGE partner plates (BGEP, BGEG, BGKU, BGPT) including TOL- variants
+    bge_mask = combined['plate_id'].apply(lambda p: is_bge_plate(str(p)) if p else False)
+    n_bge = bge_mask.sum()
+    if n_bge > 0:
+        print(f"  Excluded {n_bge} QC rows from BGE partners (BGEP/BGEG/BGKU/BGPT)")
+    combined = combined[~bge_mask]
 
     if partner and partner.upper() != 'ALL':
         mask     = combined['plate_id'].apply(

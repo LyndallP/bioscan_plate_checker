@@ -49,7 +49,7 @@ import datetime
 import pandas as pd
 
 import config
-from utils import extract_plate_from_pid
+from utils import extract_plate_from_pid, is_bge_plate
 
 # Column names from portal dump
 _SPECIMEN_COL  = 'sts_specimen.id'
@@ -201,6 +201,13 @@ def build_portal_plate_summary(dump_path, output_path, verbose=True):
     df = df[df['plate_id'].notna()]
     df = df[df['plate_id'] != 'NA']
     df = df[df['plate_id'] != 'None']
+
+    # Exclude BGE partner plates (BGEP, BGEG, BGKU, BGPT) including TOL- variants
+    n_before = len(df)
+    df = df[~df['plate_id'].apply(is_bge_plate)]
+    n_removed = n_before - len(df)
+    if n_removed > 0:
+        print(f"  Excluded {n_removed} BGE partner rows (BGEP/BGEG/BGKU/BGPT)")
     if _SPECIES_COL in df.columns:
         n_blank_total = (df[_SPECIES_COL].str.lower() == 'blank').sum()
         df = df[df[_SPECIES_COL].str.lower() != 'blank']

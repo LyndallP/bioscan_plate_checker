@@ -37,6 +37,11 @@ QC_PASS_VALUES    = {"YES"}
 QC_ONHOLD_VALUES  = {"ON_HOLD"}
 QC_FAIL_VALUES    = {"NO"}
 
+# ── BGE partner exclusion ─────────────────────────────────────────────────────
+# Records belonging to these partners are excluded from all analyses.
+# This covers both plain (BGEP-xxx) and TOL-prefixed (TOL-BGEP-xxx) plate IDs.
+BGE_PARTNER_CODES = {'BGEP', 'BGEG', 'BGKU', 'BGPT'}
+
 # ── Portal ────────────────────────────────────────────────────────────────────
 PORTAL_BATCH_SIZE       = 50
 PORTAL_RATE_LIMIT_SLEEP = 1.5  # seconds between batches
