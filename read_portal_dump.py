@@ -63,15 +63,9 @@ _SPECIES_COL   = 'sts_species.sts_scientific_name'
 _PORTAL_FILTER = (
     '{"and_":{"sts_project":{"in_list":{"value":["BIOSCAN"],"negate":false}}}}'
 )
-_PORTAL_FIELDS = ','.join([
-    'sts_rackid',
-    'sts_specimen.id',
-    'bold_nuc',
-    'sts_submit_date',
-    'bold_bold_recordset_code_arr',
-    'bold_bin_uri',
-    'sts_species.sts_scientific_name',
-])
+_PORTAL_FIELDS = (
+    'bioscan_extra_adult_feeding_guild,bioscan_extra_associations,bioscan_extra_broad_biotope_habitat_resources,bioscan_extra_current_conservation_status,bioscan_extra_larval_feeding_guild,bioscan_extra_link_to_assemblage,bioscan_extra_specific_assemblage_type,bioscan_extra_vernacular,bioscan_qc_sanger_qc_description,bioscan_qc_sanger_qc_result,bioscan_qc_uksi_name_status,bold_associated_specimens,bold_associated_taxa,bold_bin_created_date,bold_bin_uri,bold_bold_recordset_code_arr,bold_class,bold_collection_code,bold_collection_date_end,bold_collection_date_start,bold_collection_event_id,bold_collection_notes,bold_collection_time,bold_collectors,bold_coord,bold_coord_accuracy,bold_coord_source,bold_country/ocean,bold_country_iso,bold_elev,bold_elev_accuracy,bold_family,bold_fieldid,bold_genus,bold_geoid,bold_habitat,bold_identification_method,bold_identified_by,bold_inst,bold_insdc_acs,bold_kingdom,bold_life_stage,bold_marker_code,bold_museumid,bold_notes,bold_nuc,bold_nuc_basecount,bold_order,bold_phylum,bold_processid,bold_processid_minted_date,bold_province/state,bold_record_id,bold_region,bold_reproduction,bold_sampling_protocol,bold_sector,bold_sequence_run_site,bold_sequence_upload_date,bold_sex,bold_short_note,bold_site,bold_site_code,bold_species,bold_species_reference,bold_specimenid,bold_subfamily,bold_taxid,bold_taxonomy_notes,bold_tissue_type,bold_tribe,bold_voucher_type,broad_biotope_habitat_resources,current_conservation_status,id,larval_feeding_guild,link_to_assemblage,mlwh_sequencing_request_count,mlwh_sequencing_request_mlwh_order_date_max,mlwh_sequencing_request_mlwh_order_date_min,specific_assemblage_type,sts_AMOUNT_OF_CATCH_PLATED,sts_BOLD_ACCESSION_NUMBER,sts_BOTTLE_DIRECTION,sts_CATCH_BOTTLE_TEMPERATURE_STORAGE,sts_CATCH_LOT,sts_CATCH_SOLUTION,sts_COLLECTION_METHOD,sts_CONTRIBUTORS,sts_COUNTRY_OF_COLLECTION,sts_DATE_OF_PLATING,sts_DURATION_OF_COLLECTION,sts_MORPHOSPECIES_DESCRIPTION,sts_PLATE_TEMPERATURE_STORAGE,sts_PREDICTED_FAMILY,sts_PREDICTED_GENUS,sts_PREDICTED_ORDER_OR_GROUP,sts_PREDICTED_SCIENTIFIC_NAME,sts_SORTING_SOLUTION_USED,sts_WHAT_3_WORDS,sts_col_date,sts_col_time,sts_collection_country,sts_collection_locality,sts_collection_method_desc,sts_created_on,sts_depth,sts_elevation,sts_gal_abbreviation,sts_gal_name,sts_habitat,sts_identify_name,sts_labwhere_name,sts_latitude,sts_lifestage,sts_location,sts_longitude,sts_organism_part,sts_other_info,sts_preservation_approach,sts_preservative_solution,sts_rackid,sts_receive_date,sts_sex,sts_voucherid,uksi_name_status,vernacular,sts_sampleset.id,sts_manifest.id,adult_feeding_guild,associations,sts_specimen.id,sts_submit_date,sts_species.sts_scientific_name,bioscan_image_url,sts_specimen_risk'
+)
 
 
 
@@ -213,13 +207,28 @@ def build_portal_plate_summary(dump_path, output_path, verbose=True, exclude_bge
         df = df[df[_SPECIES_COL].str.lower() != 'blank']
         print(f"  Removed {n_blank_total} blank wells (empty/control wells from portal)")
 
-    # Partner: use bold_bold_recordset_code_arr from portal if available
-    # This is correct for all partners including MOZZ plates which belong to
-    # various different partners and cannot be identified from the plate ID alone.
-    # Fall back to extracting from plate ID only if the portal field is missing.
+    # Partner: use bold_bold_recordset_code_arr from portal if available.
+    # The field comes through as a stringified list e.g. "['FACE']" or "['SCAMP']"
+    # so we need to strip brackets and quotes.
+    # Fall back to plate ID parsing for rows where the field is None/empty.
     if _PARTNER_COL in df.columns:
-        df['partner'] = df[_PARTNER_COL].str.strip().replace({'None': None, '': None})
-        # Fill blanks from plate ID as fallback
+        def clean_partner(val):
+            if not val or val in ('None', 'nan', ''):
+                return None
+            # Strip list brackets and quotes: "['FACE']" -> "FACE"
+            val = str(val).strip()
+            val = val.strip('[]').strip().strip("'\"")
+            # Some partners have a prefix letter added (SCAMP->CAMP, BNHMG->NHMG)
+            # These are BIOSCAN-specific recordset codes with a leading letter
+            # Strip leading non-standard letter if result is 5 chars and
+            # last 4 are uppercase letters
+            import re
+            if re.match(r'[A-Z][A-Z]{4}$', val) and not re.match(r'[A-Z]{4}$', val):
+                val = val[1:]  # strip leading letter e.g. SCAMP->CAMP, BNHMG->NHMG
+            return val if val else None
+
+        df['partner'] = df[_PARTNER_COL].apply(clean_partner)
+        # Fill remaining None from plate ID
         missing = df['partner'].isna()
         if missing.any():
             df.loc[missing, 'partner'] = (
