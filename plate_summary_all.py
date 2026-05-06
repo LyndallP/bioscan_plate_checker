@@ -84,14 +84,14 @@ def _normalise_plate_id(plate_id):
 
 # ── Portal plate list ─────────────────────────────────────────────────────────
 
-def load_portal_plates(portal_csv=None):
+def load_portal_plates(portal_csv=None, exclude_bge=False):
     if portal_csv is None:
         portal_csv = config.PORTAL_PLATES_CSV
     df = pd.read_csv(portal_csv, dtype=str)
     # Normalise plate IDs to strip TOL- prefix for consistent matching
     df['plate_id'] = df['plate_id'].apply(_normalise_plate_id)
-    # Exclude BGE partner plates (BGEP, BGEG, BGKU, BGPT)
-    df = df[~df['plate_id'].apply(is_bge_plate)]
+    if exclude_bge:
+        df = df[~df['plate_id'].apply(is_bge_plate)]
     df['partner'] = df['plate_id'].apply(_extract_partner)
     # Deduplicate in case stripping creates duplicates (keep first)
     df = df.drop_duplicates(subset='plate_id', keep='first')
@@ -138,7 +138,7 @@ def _parse_pos_control(label):
     return (m.group(1) if m else None), None
 
 
-def load_umi_data(mbrave_dir, resolved_batches, verbose=False):
+def load_umi_data(mbrave_dir, resolved_batches, verbose=False, exclude_bge=False):
     """
     Load sample and control stats from all mBRAVE batches.
 
@@ -191,7 +191,7 @@ def load_umi_data(mbrave_dir, resolved_batches, verbose=False):
                         # Normalise specimen label to strip TOL- prefix
                         # so TOL-BGEP-111_A1 and BGEP-111_A1 are the same specimen
                         norm_label = label[4:] if label.upper().startswith('TOL-') else label
-                        if not is_bge_plate(plate_id):
+                        if not exclude_bge or not is_bge_plate(plate_id):
                             specimens[plate_id][batch_folder].append(norm_label)
             except Exception:
                 pass
@@ -208,7 +208,7 @@ def load_umi_data(mbrave_dir, resolved_batches, verbose=False):
                     count    = str(row.get('Count', '0')).strip()
                     if not label or not plate_id or plate_id in ('nan', ''):
                         continue
-                    if is_bge_plate(plate_id):
+                    if exclude_bge and is_bge_plate(plate_id):
                         continue
                     ctrl_type, well, sqpp_id = _parse_neg_control(label)
                     controls_neg[plate_id][batch_folder].append({
@@ -233,7 +233,7 @@ def load_umi_data(mbrave_dir, resolved_batches, verbose=False):
                     count    = str(row.get('Count', '0')).strip()
                     if not label or not plate_id or plate_id in ('nan', ''):
                         continue
-                    if is_bge_plate(plate_id):
+                    if exclude_bge and is_bge_plate(plate_id):
                         continue
                     well, sqpp_id = _parse_pos_control(label)
                     controls_pos[plate_id][batch_folder].append({
@@ -333,7 +333,7 @@ def read_filtered_metadata(batch_folder, batch_path):
         return pd.DataFrame()
 
 
-def load_all_qc_decisions(qc_dir, qc_resolved, verbose=False):
+def load_all_qc_decisions(qc_dir, qc_resolved, verbose=False, exclude_bge=False):
     """
     Load QC decisions from qc_portal (all specimens including FAILED)
     and category numbers from filtered_metadata (PASS/ON_HOLD only but
@@ -377,7 +377,7 @@ def load_all_qc_decisions(qc_dir, qc_resolved, verbose=False):
         for _, row in portal_df.iterrows():
             pid = str(row['pid']).strip()
             dec = str(row['decision']).strip()
-            if pid and not is_bge_plate(pid):
+            if pid and (not exclude_bge or not is_bge_plate(pid)):
                 all_decisions[pid].append({
                     'batch':    batch_folder,
                     'decision': dec,
@@ -578,13 +578,15 @@ def main():
     )
     parser.add_argument('--partner', default='ALL')
     parser.add_argument('--verbose', action='store_true')
+    parser.add_argument('--exclude-bge', action='store_true',
+        help='Exclude BGE partner plates (BGEP, BGEG, BGKU, BGPT) from output')
     args = parser.parse_args()
 
     today = datetime.datetime.now().strftime('%Y%m%d')
     os.makedirs(config.RESULTS_DIR, exist_ok=True)
 
     print("Loading portal plate list...")
-    portal_plates = load_portal_plates()
+    portal_plates = load_portal_plates(exclude_bge=args.exclude_bge)
     print(f"  {len(portal_plates)} plates in portal")
 
     print("Resolving batches...")
@@ -596,12 +598,14 @@ def main():
 
     print("Loading UMI stats...")
     specimens, controls_neg, controls_pos = load_umi_data(
-        config.MBRAVE_DIR, mbrave_resolved, verbose=args.verbose)
+        config.MBRAVE_DIR, mbrave_resolved, verbose=args.verbose,
+        exclude_bge=args.exclude_bge)
     print(f"  {len(specimens)} plates with specimen data")
 
     print("Loading QC decisions...")
     all_qc_decisions = load_all_qc_decisions(
-        config.QC_DIR, qc_resolved, verbose=args.verbose)
+        config.QC_DIR, qc_resolved, verbose=args.verbose,
+        exclude_bge=args.exclude_bge)
     print(f"  {len(all_qc_decisions)} unique specimens with QC decisions")
 
     print("Building plate summary...")

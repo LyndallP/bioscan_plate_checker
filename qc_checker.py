@@ -82,7 +82,8 @@ def get_qc_from_batch(batch_folder, batch_path, verbose=False):
     return df[['plate_id', _PID_COL, 'status', 'qc_batch']].copy()
 
 
-def build_qc_plate_index(mbrave_dir=None, qc_dir=None, partner=None, verbose=False):
+def build_qc_plate_index(mbrave_dir=None, qc_dir=None, partner=None, verbose=False,
+                         exclude_bge=False):
     """
     Scan all resolved QC batches and build per-plate QC summary.
 
@@ -131,12 +132,12 @@ def build_qc_plate_index(mbrave_dir=None, qc_dir=None, partner=None, verbose=Fal
 
     combined = pd.concat(all_records, ignore_index=True)
 
-    # Exclude BGE partner plates (BGEP, BGEG, BGKU, BGPT) including TOL- variants
-    bge_mask = combined['plate_id'].apply(lambda p: is_bge_plate(str(p)) if p else False)
-    n_bge = bge_mask.sum()
-    if n_bge > 0:
-        print(f"  Excluded {n_bge} QC rows from BGE partners (BGEP/BGEG/BGKU/BGPT)")
-    combined = combined[~bge_mask]
+    if exclude_bge:
+        bge_mask = combined['plate_id'].apply(lambda p: is_bge_plate(str(p)) if p else False)
+        n_bge = bge_mask.sum()
+        if n_bge > 0:
+            print(f"  Excluded {n_bge} QC rows from BGE partners (BGEP/BGEG/BGKU/BGPT)")
+        combined = combined[~bge_mask]
 
     if partner and partner.upper() != 'ALL':
         mask     = combined['plate_id'].apply(
@@ -196,9 +197,11 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--partner', default='ALL')
     parser.add_argument('--verbose', action='store_true')
+    parser.add_argument('--exclude-bge', action='store_true',
+        help='Exclude BGE partner plates (BGEP, BGEG, BGKU, BGPT)')
     args = parser.parse_args()
     summary, mbrave_to_qc, qc_to_mbrave, issues, no_qc = build_qc_plate_index(
-        partner=args.partner, verbose=args.verbose)
+        partner=args.partner, verbose=args.verbose, exclude_bge=args.exclude_bge)
     summarise_qc(summary, no_qc)
     if issues:
         print(f"\nMapping issues ({len(issues)}):")

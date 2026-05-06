@@ -166,7 +166,7 @@ def is_control_plate(plate_id):
             'CONTROL_POS' in pid)
 
 
-def build_portal_plate_summary(dump_path, output_path, verbose=True):
+def build_portal_plate_summary(dump_path, output_path, verbose=True, exclude_bge=False):
     """
     Read portal dump TSV and write plate-level summary CSV.
 
@@ -202,12 +202,12 @@ def build_portal_plate_summary(dump_path, output_path, verbose=True):
     df = df[df['plate_id'] != 'NA']
     df = df[df['plate_id'] != 'None']
 
-    # Exclude BGE partner plates (BGEP, BGEG, BGKU, BGPT) including TOL- variants
-    n_before = len(df)
-    df = df[~df['plate_id'].apply(is_bge_plate)]
-    n_removed = n_before - len(df)
-    if n_removed > 0:
-        print(f"  Excluded {n_removed} BGE partner rows (BGEP/BGEG/BGKU/BGPT)")
+    if exclude_bge:
+        n_before = len(df)
+        df = df[~df['plate_id'].apply(is_bge_plate)]
+        n_removed = n_before - len(df)
+        if n_removed > 0:
+            print(f"  Excluded {n_removed} BGE partner rows (BGEP/BGEG/BGKU/BGPT)")
     if _SPECIES_COL in df.columns:
         n_blank_total = (df[_SPECIES_COL].str.lower() == 'blank').sum()
         df = df[df[_SPECIES_COL].str.lower() != 'blank']
@@ -319,6 +319,8 @@ def main():
         help='Path to existing portal dump TSV (skip fetch)')
     parser.add_argument('--output', default=None,
         help='Output CSV path (default: RESULTS_DIR/portal_plates_from_dump.csv)')
+    parser.add_argument('--exclude-bge', action='store_true',
+        help='Exclude BGE partner plates (BGEP, BGEG, BGKU, BGPT) from output')
     args = parser.parse_args()
 
     os.makedirs(config.RESULTS_DIR, exist_ok=True)
@@ -348,7 +350,7 @@ def main():
     if args.output is None:
         args.output = os.path.join(config.RESULTS_DIR, 'portal_plates_from_dump.csv')
 
-    build_portal_plate_summary(dump_path, args.output)
+    build_portal_plate_summary(dump_path, args.output, exclude_bge=args.exclude_bge)
 
 
 if __name__ == '__main__':

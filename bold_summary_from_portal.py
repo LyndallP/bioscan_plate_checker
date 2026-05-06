@@ -66,7 +66,7 @@ def is_control(specimen_id):
             sid.startswith('CONTROL-'))
 
 
-def load_portal_dump(dump_path, partner=None):
+def load_portal_dump(dump_path, partner=None, exclude_bge=False):
     """Load portal dump and return specimen-level DataFrame."""
     print(f"Reading portal dump: {dump_path}")
     df = pd.read_csv(dump_path, sep='\t', dtype=str,
@@ -82,12 +82,12 @@ def load_portal_dump(dump_path, partner=None):
     df = df[df['plate_id'].notna()]
     df = df[~df['plate_id'].isin(['NA', 'None', ''])]
 
-    # Exclude BGE partner plates (BGEP, BGEG, BGKU, BGPT) including TOL- variants
-    n_before = len(df)
-    df = df[~df['plate_id'].apply(is_bge_plate)]
-    n_removed = n_before - len(df)
-    if n_removed > 0:
-        print(f"  Excluded {n_removed} BGE partner rows (BGEP/BGEG/BGKU/BGPT)")
+    if exclude_bge:
+        n_before = len(df)
+        df = df[~df['plate_id'].apply(is_bge_plate)]
+        n_removed = n_before - len(df)
+        if n_removed > 0:
+            print(f"  Excluded {n_removed} BGE partner rows (BGEP/BGEG/BGKU/BGPT)")
 
     # Fix None strings
     for col in [_BOLD_NUC_COL, _UPLOAD_DATE_COL, _BIN_URI_COL, _BIN_DATE_COL]:
@@ -229,12 +229,15 @@ def main():
     parser.add_argument('--input', default=config.PORTAL_DUMP_TSV,
         help='Path to portal dump TSV')
     parser.add_argument('--partner', default='ALL')
+    parser.add_argument('--exclude-bge', action='store_true',
+        help='Exclude BGE partner plates (BGEP, BGEG, BGKU, BGPT) from output')
     args = parser.parse_args()
 
     today = datetime.datetime.now().strftime('%Y%m%d')
     os.makedirs(config.RESULTS_DIR, exist_ok=True)
 
-    df       = load_portal_dump(args.input, partner=args.partner)
+    df       = load_portal_dump(args.input, partner=args.partner,
+                                exclude_bge=args.exclude_bge)
     plate_df = build_plate_summary(df)
 
     # Save outputs
