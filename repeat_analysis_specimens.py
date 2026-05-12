@@ -267,8 +267,9 @@ def main():
     parser.add_argument('--verbose', action='store_true')
     args = parser.parse_args()
 
-    today = datetime.datetime.now().strftime('%Y%m%d')
-    os.makedirs(config.RESULTS_DIR, exist_ok=True)
+    run_ts  = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+    run_dir = os.path.join(config.RESULTS_DIR, run_ts)
+    os.makedirs(run_dir, exist_ok=True)
 
     print("=" * 60)
     print("Loading QC portal data from all batches...")
@@ -301,12 +302,9 @@ def main():
     print_summary(summary_df, df)
 
     # Save outputs
-    long_path    = os.path.join(config.RESULTS_DIR,
-                                f'repeat_specimens_long_{today}.csv')
-    wide_path    = os.path.join(config.RESULTS_DIR,
-                                f'repeat_specimens_wide_{today}.csv')
-    summary_path = os.path.join(config.RESULTS_DIR,
-                                f'repeat_specimens_summary_{today}.csv')
+    long_path    = os.path.join(run_dir, f'repeat_specimens_long_{run_ts}.csv')
+    wide_path    = os.path.join(run_dir, f'repeat_specimens_wide_{run_ts}.csv')
+    summary_path = os.path.join(run_dir, f'repeat_specimens_summary_{run_ts}.csv')
 
     # Save transition matrix
     transitions = summary_df.groupby(
@@ -314,15 +312,14 @@ def main():
     transitions['pct_of_total'] = (
         100 * transitions['n'] / len(summary_df)).round(1)
     transitions = transitions.sort_values('n', ascending=False)
-    transition_path = os.path.join(config.RESULTS_DIR,
-                                   f'repeat_specimens_transitions_{today}.csv')
+    transition_path = os.path.join(run_dir, f'repeat_specimens_transitions_{run_ts}.csv')
     transitions.to_csv(transition_path, index=False)
 
     long_df.to_csv(long_path, index=False)
     wide_df.to_csv(wide_path, index=False)
     summary_df.to_csv(summary_path, index=False)
 
-    print(f"\nOutputs written:")
+    print(f"\nOutputs written to {run_dir}:")
     print(f"  {summary_path}     <- one row per specimen, trajectory summary")
     print(f"  {transition_path}  <- transition matrix (first → last decision)")
     print(f"  {long_path}        <- one row per specimen per batch")

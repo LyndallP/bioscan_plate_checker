@@ -39,7 +39,11 @@ All input data is read directly from lustre — nothing is copied or modified.
 All outputs are written to:
 `/lustre/scratch126/tol/teams/lawniczak/users/lp20/bioscan_plate_checker_results/`
 
-Files are dated `YYYYMMDD`.
+Each script run creates a timestamped subdirectory `YYYYMMDD_HHMMSS/` inside the results directory. Files within that folder carry the same timestamp in their name. This means repeated runs never overwrite each other and every set of outputs is fully traceable to a specific run.
+
+Two cache files remain in the root (they are shared inputs between scripts, not run-specific outputs):
+- `portal_plates_from_dump.csv` — built by `read_portal_dump.py`, read by `plate_status_report.py` and `plate_summary_all.py`
+- `bold_workbench_combined.csv` — built by `bold_workbench_analysis.py` on first run
 
 ---
 
@@ -57,7 +61,7 @@ Files are dated `YYYYMMDD`.
 
 | File | Type | Level | Description |
 |---|---|---|---|
-| `pipeline_report_YYYYMMDD.txt` | Text | Summary | Human-readable report of the full pipeline status. Shows overall pass-through rates at each stage, per-partner breakdown, plates flagged as old submissions not yet sequenced (configurable threshold, default 180 days), and BOLD upload gaps by partner. Best file to share with project managers or partners. |
+| `pipeline_report_YYYYMMDD_HHMMSS.txt` | Text | Summary | Human-readable report of the full pipeline status. Shows overall pass-through rates at each stage, per-partner breakdown, plates flagged as old submissions not yet sequenced (configurable threshold, default 90 days), and BOLD upload gaps by partner. Best file to share with project managers or partners. |
 
 ---
 
@@ -102,8 +106,21 @@ Files are dated `YYYYMMDD`.
 
 | File | Type | Level | Description |
 |---|---|---|---|
-| `missing_specimens_categorised_YYYYMMDD.csv` | CSV | Specimen | One row per specimen absent from the consensusseq table. Categorised as Cat1 (zero reads), Cat2_low (few reads, no consensus), or Cat2_high (reads present but no consensus — investigate). |
-| `missing_specimens_batch_summary_YYYYMMDD.csv` | CSV | Batch | Batch-level counts of expected vs present specimens in each category. Use to identify batches with systematic assembly failures. |
+| `missing_specimens_categorised_YYYYMMDD_HHMMSS.csv` | CSV | Specimen | One row per specimen absent from the consensusseq table. Categorised as Cat1 (zero reads), Cat2_low (few reads, no consensus), or Cat2_high (reads present but no consensus — investigate). |
+| `missing_specimens_batch_summary_YYYYMMDD_HHMMSS.csv` | CSV | Batch | Batch-level counts of expected vs present specimens in each category. Use to identify batches with systematic assembly failures. |
+
+---
+
+### From `qc_bold_mismatch.py` — data integrity check: QC-FAILED specimens in BOLD
+
+Flags specimens that have QC result = FAILED (`category_decision = NO`) but still have a sequence on BOLD. This should never happen — only QC-passed specimens should be transferred. Any match indicates a data integrity issue requiring investigation.
+
+BGE partner plates (BGEP, BGEG, BGKU, BGPT) are excluded from this check by default.
+
+| File | Type | Level | Description |
+|---|---|---|---|
+| `qc_bold_mismatch_ALL_YYYYMMDD_HHMMSS.csv` | CSV | Specimen | One row per mismatch. Columns: `specimen_id`, `plate_id`, `partner`, `qc_batch`, `qc_decision_raw`, `bold_nuc`, `bold_sequence_upload_date`, `bold_bin_uri`, `sts_submit_date`. |
+| `qc_bold_mismatch_ALL_YYYYMMDD_HHMMSS.txt` | Text | Summary | Human-readable report: total mismatches, breakdown by partner and QC batch, detail table. |
 
 ---
 
@@ -183,7 +200,7 @@ python3 read_portal_dump.py
 # 2. Master plate status table: portal → mBRAVE → QC → BOLD
 python3 plate_status_report.py --partner ALL
 
-# 3. Human-readable pipeline report
+# 3. Human-readable pipeline report (flags plates not sequenced within 90 days)
 python3 generate_pipeline_report.py
 
 # 4. Comprehensive plate-level QC summary (best result per specimen, all controls)
@@ -192,18 +209,23 @@ python3 plate_summary_all.py --partner ALL
 # 5. BOLD upload and BIN URI summary
 python3 bold_summary_from_portal.py --partner ALL
 
-# 6. Repeat analysis — plate level
+# 6. Data integrity check: QC-FAILED specimens present in BOLD
+python3 qc_bold_mismatch.py
+
+# 7. Repeat analysis — plate level
 python3 repeat_analysis.py --partner ALL
 
-# 7. Repeat analysis — specimen level with QC decisions per batch
+# 8. Repeat analysis — specimen level with QC decisions per batch
 python3 repeat_analysis_specimens.py --partner ALL
 
-# 8. Missing specimen analysis (~10 mins)
+# 9. Missing specimen analysis (~10 mins)
 python3 missing_specimen_analysis.py --partner ALL
 
-# 9. BOLD workbench analysis (when new workbench files downloaded)
+# 10. BOLD workbench analysis (when new workbench files downloaded)
 python3 bold_workbench_analysis.py --partner ALL --rebuild-cache
 ```
+
+To exclude BGE partner plates (BGEP, BGEG, BGKU, BGPT) from any run, add `--exclude-bge` to steps 1, 2, 4, 5, 6.
 
 ### Quarterly BOLD sanity check
 
@@ -248,11 +270,12 @@ python3 utils.py   # run the batch structure audit
 ---
 
 ### `read_portal_dump.py`
-Reads the portal manifest TSV and builds a plate-level summary CSV. Run whenever a new dump is available.
+Reads the portal manifest TSV and builds a plate-level summary CSV (`portal_plates_from_dump.csv`). Run whenever a new dump is available. The output CSV is a shared cache in the root of `RESULTS_DIR` (not in a timestamped subfolder) because it is read by `plate_status_report.py` and `plate_summary_all.py`.
 
 ```bash
 python3 read_portal_dump.py
 python3 read_portal_dump.py --input /path/to/sts_manifests_20260427.tsv
+python3 read_portal_dump.py --exclude-bge   # omit BGEP/BGEG/BGKU/BGPT from the cache
 ```
 
 ---
@@ -270,11 +293,11 @@ python3 plate_status_report.py --partner ALL --missing-only
 ---
 
 ### `generate_pipeline_report.py`
-Human-readable pipeline report. Flags plates submitted more than N days ago not yet sequenced.
+Human-readable pipeline report. Flags plates submitted more than N days ago not yet sequenced (default: 90 days).
 
 ```bash
 python3 generate_pipeline_report.py
-python3 generate_pipeline_report.py --old-threshold-days 180
+python3 generate_pipeline_report.py --old-threshold-days 90
 ```
 
 ---
@@ -285,6 +308,7 @@ BOLD upload and BIN URI summaries from the portal dump. No API or R required.
 ```bash
 python3 bold_summary_from_portal.py --partner ALL
 python3 bold_summary_from_portal.py --partner FACE
+python3 bold_summary_from_portal.py --exclude-bge   # omit BGEP/BGEG/BGKU/BGPT plates
 ```
 
 ---
@@ -309,6 +333,7 @@ Produces two output files: PASS/ON_HOLD/FAIL summary, and categories 1–12 brea
 python3 plate_summary_all.py --partner ALL
 python3 plate_summary_all.py --partner BGEP
 python3 plate_summary_all.py --verbose
+python3 plate_summary_all.py --exclude-bge   # omit BGEP/BGEG/BGKU/BGPT plates
 ```
 
 ### `repeat_analysis.py`
@@ -348,6 +373,17 @@ Categorises specimens absent from consensusseq by read count.
 python3 missing_specimen_analysis.py --partner ALL
 python3 missing_specimen_analysis.py --batch batch41_1
 python3 missing_specimen_analysis.py --low-read-threshold 50
+```
+
+---
+
+### `qc_bold_mismatch.py`
+Data integrity check. Cross-references QC-FAILED specimens against BOLD upload records in the portal dump. Any specimen that failed QC but has a sequence on BOLD is a data integrity problem requiring investigation.
+
+```bash
+python3 qc_bold_mismatch.py                  # all non-BGE partners
+python3 qc_bold_mismatch.py --partner FACE
+python3 qc_bold_mismatch.py --verbose        # per-batch logging
 ```
 
 ---

@@ -402,8 +402,9 @@ def main():
     parser.add_argument('--verbose', action='store_true')
     args = parser.parse_args()
 
-    today = datetime.datetime.now().strftime('%Y%m%d')
-    os.makedirs(config.RESULTS_DIR, exist_ok=True)
+    run_ts  = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+    run_dir = os.path.join(config.RESULTS_DIR, run_ts)
+    os.makedirs(run_dir, exist_ok=True)
 
     # Load workbench
     print("=" * 60)
@@ -434,8 +435,8 @@ def main():
                 specimen_ids=set(flagged_df[WB_SAMPLE_ID].dropna()))
             flagged_comp = run_sequence_comparison(
                 flagged_df, qc_seqs, portal_seqs, mode='flagged')
-            flagged_path = os.path.join(config.RESULTS_DIR,
-                f'bold_flagged_comparison_{today}.csv')
+            flagged_path = os.path.join(run_dir,
+                f'bold_flagged_comparison_{run_ts}.csv')
             flagged_comp.to_csv(flagged_path, index=False)
             print(f"  Flagged comparison saved: {flagged_path}")
 
@@ -447,8 +448,8 @@ def main():
             print(f"Comparing {len(wb_df)} specimens...")
             full_comp = run_sequence_comparison(
                 wb_df, qc_seqs, all_portal_seqs, mode='full')
-            full_path = os.path.join(config.RESULTS_DIR,
-                f'bold_full_concordance_{today}.csv')
+            full_path = os.path.join(run_dir,
+                f'bold_full_concordance_{run_ts}.csv')
             full_comp.to_csv(full_path, index=False)
             print(f"  Full concordance saved: {full_path}")
 
@@ -461,7 +462,8 @@ def main():
 
         import glob as _glob
         bin_files = sorted(_glob.glob(
-            os.path.join(config.RESULTS_DIR, 'bold_missing_bin_*.csv')))
+            os.path.join(config.RESULTS_DIR, '**', 'bold_missing_bin_*.csv'),
+            recursive=True))
 
         if bin_files:
             no_bin_df  = pd.read_csv(bin_files[-1], dtype=str)
@@ -475,8 +477,8 @@ def main():
                     columns={'sts_specimen.id':'specimen_id'}),
                 on='specimen_id', how='left')
 
-            resub_path = os.path.join(config.RESULTS_DIR,
-                                      f'bold_needs_resubmission_{today}.csv')
+            resub_path = os.path.join(run_dir,
+                                      f'bold_needs_resubmission_{run_ts}.csv')
             actionable.to_csv(resub_path, index=False)
             print(f"  {len(actionable)} specimens: no BIN + flagged + QC has better sequence")
             print(f"  Saved: {resub_path}")
@@ -493,8 +495,8 @@ def main():
                     columns={'sts_specimen.id':'specimen_id'}),
                 on='specimen_id', how='left')
 
-            identical_path = os.path.join(config.RESULTS_DIR,
-                                          f'bold_flagged_no_alternative_{today}.csv')
+            identical_path = os.path.join(run_dir,
+                                          f'bold_flagged_no_alternative_{run_ts}.csv')
             identical.to_csv(identical_path, index=False)
             print(f"\n  {len(identical)} specimens: flagged, IDENTICAL sequence in QC FASTA")
             print(f"  Flag is genuine — no better sequence available")
@@ -523,20 +525,18 @@ def main():
         n_any_flag   =('any_flag','sum'),
     ).reset_index()
 
-    plate_path = os.path.join(config.RESULTS_DIR,
-                              f'bold_workbench_plates_{today}.csv')
+    plate_path = os.path.join(run_dir, f'bold_workbench_plates_{run_ts}.csv')
     plate_summary.to_csv(plate_path, index=False)
 
-    report_path = os.path.join(config.RESULTS_DIR,
-                               f'bold_workbench_report_{today}.txt')
+    report_path = os.path.join(run_dir, f'bold_workbench_report_{run_ts}.txt')
     generate_report(wb_df, flagged_comp, full_comp,
                     args.partner, report_path)
 
-    print(f"\nOutputs:")
-    print(f"  {report_path}       <- full flag report")
+    print(f"\nOutputs written to {run_dir}:")
+    print(f"  {report_path}  <- full flag report")
     print(f"  {plate_path}  <- plate-level flag counts")
     if flagged_comp is not None:
-        print(f"  bold_needs_resubmission_{today}.csv   <- BOLD records to update (DIFFERENT + no BIN)")
+        print(f"  bold_needs_resubmission_{run_ts}.csv   <- BOLD records to update (DIFFERENT + no BIN)")
         print(f"  bold_flagged_no_alternative_{today}.csv <- genuine flags, manual review needed (IDENTICAL)")
 
 

@@ -342,8 +342,9 @@ def main():
     parser.add_argument('--verbose', action='store_true')
     args = parser.parse_args()
 
-    today = datetime.datetime.now().strftime('%Y%m%d')
-    os.makedirs(config.RESULTS_DIR, exist_ok=True)
+    run_ts  = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+    run_dir = os.path.join(config.RESULTS_DIR, run_ts)
+    os.makedirs(run_dir, exist_ok=True)
 
     # ── 1. Load QC FAILED specimens ───────────────────────────────────────────
     print("Loading QC-FAILED specimens...")
@@ -382,10 +383,8 @@ def main():
 
     # ── 4. Save outputs ───────────────────────────────────────────────────────
     partner_tag = args.partner.upper() if args.partner else 'ALL'
-    csv_path    = os.path.join(config.RESULTS_DIR,
-                               f'qc_bold_mismatch_{partner_tag}_{today}.csv')
-    report_path = os.path.join(config.RESULTS_DIR,
-                               f'qc_bold_mismatch_{partner_tag}_{today}.txt')
+    csv_path    = os.path.join(run_dir, f'qc_bold_mismatch_{partner_tag}_{run_ts}.csv')
+    report_path = os.path.join(run_dir, f'qc_bold_mismatch_{partner_tag}_{run_ts}.txt')
 
     mismatches.to_csv(csv_path, index=False)
     print(f"  CSV saved: {csv_path}")
@@ -393,7 +392,7 @@ def main():
     generate_report(mismatches, len(failed_df), len(bold_df),
                     partner_tag, report_path)
 
-    print(f"\nOutputs:")
+    print(f"\nOutputs written to {run_dir}:")
     print(f"  {csv_path}")
     print(f"  {report_path}")
 

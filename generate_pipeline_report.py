@@ -12,7 +12,7 @@ Produces:
 Usage:
     python3 generate_pipeline_report.py
     python3 generate_pipeline_report.py --input /path/to/bioscan_plate_status_ALL_20260411.csv
-    python3 generate_pipeline_report.py --old-threshold-days 180
+    python3 generate_pipeline_report.py --old-threshold-days 90
 """
 
 import argparse
@@ -25,9 +25,11 @@ import config
 
 
 def find_latest_status_csv(results_dir):
-    """Find the most recently generated plate status CSV."""
-    pattern = os.path.join(results_dir, 'bioscan_plate_status_ALL_*.csv')
-    files = sorted(glob.glob(pattern))
+    """Find the most recently generated plate status CSV (root or timestamped subdir)."""
+    files = sorted(
+        glob.glob(os.path.join(results_dir, 'bioscan_plate_status_ALL_*.csv')) +
+        glob.glob(os.path.join(results_dir, '*', 'bioscan_plate_status_ALL_*.csv'))
+    )
     if not files:
         raise FileNotFoundError(
             f"No plate status CSV found in {results_dir}\n"
@@ -36,7 +38,7 @@ def find_latest_status_csv(results_dir):
     return files[-1]
 
 
-def generate_report(df, old_threshold_days=180, output_path=None):
+def generate_report(df, old_threshold_days=90, output_path=None):
     """
     Generate pipeline status report from master plate DataFrame.
     """
@@ -191,8 +193,8 @@ def main():
     )
     parser.add_argument('--input', default=None,
         help='Path to plate status CSV (default: latest in RESULTS_DIR)')
-    parser.add_argument('--old-threshold-days', type=int, default=180,
-        help='Days after which an unsequenced submission is flagged (default: 180)')
+    parser.add_argument('--old-threshold-days', type=int, default=90,
+        help='Days after which an unsequenced submission is flagged (default: 90)')
     parser.add_argument('--output', default=None,
         help='Output report path (default: RESULTS_DIR/pipeline_report_YYYYMMDD.txt)')
     args = parser.parse_args()
@@ -202,11 +204,14 @@ def main():
         args.input = find_latest_status_csv(config.RESULTS_DIR)
     print(f"Reading: {args.input}")
 
+    # Create timestamped run directory
+    run_ts  = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+    run_dir = os.path.join(config.RESULTS_DIR, run_ts)
+    os.makedirs(run_dir, exist_ok=True)
+
     # Output path
     if args.output is None:
-        today = datetime.datetime.now().strftime('%Y%m%d')
-        args.output = os.path.join(
-            config.RESULTS_DIR, f'pipeline_report_{today}.txt')
+        args.output = os.path.join(run_dir, f'pipeline_report_{run_ts}.txt')
 
     df = pd.read_csv(args.input, dtype=str)
     # Fix numeric columns

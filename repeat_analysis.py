@@ -202,16 +202,15 @@ def main():
                              verbose=args.verbose)
     print_repeat_summary(df)
 
-    today = datetime.datetime.now().strftime('%Y%m%d')
-    os.makedirs(config.RESULTS_DIR, exist_ok=True)
+    run_ts  = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+    run_dir = os.path.join(config.RESULTS_DIR, run_ts)
+    os.makedirs(run_dir, exist_ok=True)
 
-    csv_path  = os.path.join(config.RESULTS_DIR,
-                             f'repeat_analysis_{today}.csv')
-    xlsx_path = os.path.join(config.RESULTS_DIR,
-                             f'repeat_analysis_{today}.xlsx')
+    csv_path  = os.path.join(run_dir, f'repeat_analysis_{run_ts}.csv')
+    xlsx_path = os.path.join(run_dir, f'repeat_analysis_{run_ts}.xlsx')
     df.to_csv(csv_path, index=False)
     df.to_excel(xlsx_path, index=False)
-    print(f"\nOutputs written:")
+    print(f"\nOutputs written to {run_dir}:")
     print(f"  {csv_path}")
     print(f"  {xlsx_path}")
 

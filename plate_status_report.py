@@ -266,7 +266,9 @@ def main():
     if batches_missing_qc:
         print(f"Batches with no filtered_metadata: {batches_missing_qc}")
 
-    save_outputs(df, args.partner)
+    run_ts  = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+    run_dir = os.path.join(config.RESULTS_DIR, run_ts)
+    save_outputs(df, args.partner, results_dir=run_dir)
 
 
 if __name__ == '__main__':
