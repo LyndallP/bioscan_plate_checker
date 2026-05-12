@@ -450,14 +450,15 @@ def section_repeat(repeat_plate, repeat_transitions, repeat_summary, exclude_bge
             ('ON_HOLD','ON_HOLD'): "No change",
         }
         trans = repeat_transitions.copy()
-        if 'count' in trans.columns:
-            trans['count'] = pd.to_numeric(trans['count'], errors='coerce')
-            total_trans = trans['count'].sum()
-            trans = trans.sort_values('count', ascending=False)
+        n_col = 'n' if 'n' in trans.columns else 'count'
+        if n_col in trans.columns:
+            trans[n_col] = pd.to_numeric(trans[n_col], errors='coerce')
+            total_trans = trans[n_col].sum()
+            trans = trans.sort_values(n_col, ascending=False)
             for _, r in trans.iterrows():
                 first = str(r.get('first_decision',''))
                 last  = str(r.get('last_decision',''))
-                n     = int(r['count'])
+                n     = int(r[n_col])
                 note  = interp.get((first, last), "")
                 lines.append(f"| {first} | {last} | {fmt(n)} | {pct(n, total_trans)} | {note} |")
         lines.append("")
@@ -551,14 +552,15 @@ def section_bold_flags(bold_report_path, bold_needs_resub, bold_flagged_no_alt,
         with open(bold_report_path) as f:
             txt = f.read()
         def _extract(label):
-            m = re.search(rf'{label}\s*:\s*([\d,]+)', txt)
+            m = re.search(rf'{re.escape(label)}\s*:\s*([\d,]+)', txt)
             return int(m.group(1).replace(',','')) if m else 0
         total_wb   = _extract('Total specimens on BOLD')
         with_bin   = _extract('With BIN URI')
-        any_flag   = _extract('Any flag')
         stop_codon = _extract('Has stop codon flag')
         contam     = _extract('Has contamination flag')
         flagged_rec= _extract('Flagged record')
+        m = re.search(r'Any flag[^:]*:\s*([\d,]+)', txt)
+        any_flag = int(m.group(1).replace(',','')) if m else stop_codon + contam + flagged_rec
 
     # Sequence concordance
     neither = qc_only = different = identical = bold_only = 0
