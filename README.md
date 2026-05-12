@@ -124,6 +124,26 @@ BGE partner plates (BGEP, BGEG, BGKU, BGPT) are excluded from this check by defa
 
 ---
 
+### From `generate_html_report.py` — browser-based pipeline report
+
+Aggregates the most recent outputs from all other scripts into a single self-contained HTML file. Opens in any browser — no server required.
+
+| File | Type | Level | Description |
+|---|---|---|---|
+| `bioscan_report_YYYYMMDD.html` | HTML | Summary | Interactive report with sidebar navigation. Eight sections covering pipeline overview, missing plates, BOLD upload gaps, QC pass rates, repeat sequencing, assembly failures, BOLD quality flags, and a prioritised action list. Written to the `RESULTS_DIR` root (not a timestamped subfolder) so it is easy to find after each run. |
+
+---
+
+### From `generate_summary_report.py` — Markdown pipeline report
+
+Same eight sections as the HTML report but in plain Markdown. Renders well on GitHub and in any Markdown viewer.
+
+| File | Type | Level | Description |
+|---|---|---|---|
+| `bioscan_summary_report_YYYYMMDD.md` | Markdown | Summary | Full pipeline status report with tables and actionable recommendations. Written to the `RESULTS_DIR` root (not a timestamped subfolder). Good for sharing in a repository or as a standalone reference document. |
+
+---
+
 ### From `bold_workbench_analysis.py` — BOLD quality flags and sequence concordance
 
 | File | Type | Level | Description |
@@ -223,9 +243,15 @@ python3 missing_specimen_analysis.py --partner ALL
 
 # 10. BOLD workbench analysis (when new workbench files downloaded)
 python3 bold_workbench_analysis.py --partner ALL --rebuild-cache
+
+# 11. Generate HTML report (browser-based, reads most recent outputs automatically)
+python3 generate_html_report.py
+
+# 12. Generate Markdown summary report (shareable document)
+python3 generate_summary_report.py
 ```
 
-To exclude BGE partner plates (BGEP, BGEG, BGKU, BGPT) from any run, add `--exclude-bge` to steps 1, 2, 4, 5, 6.
+To exclude BGE partner plates (BGEP, BGEG, BGKU, BGPT) from any run, add `--exclude-bge` to steps 1, 2, 4, 5, 6, 11, 12.
 
 ### Quarterly BOLD sanity check
 
@@ -415,6 +441,32 @@ python3 bold_workbench_analysis.py --partner ALL          # routine
 python3 bold_workbench_analysis.py --full-concordance     # ad hoc
 python3 bold_workbench_analysis.py --rebuild-cache        # after new files
 python3 bold_workbench_analysis.py --skip-sequence-comparison
+```
+
+---
+
+### `generate_html_report.py`
+Self-contained HTML report aggregating all pipeline outputs. Reads the most recently modified file for each expected pattern — searching both the `RESULTS_DIR` root and all timestamped subdirectories — so it always reflects the latest run without any manual file selection.
+
+Output is written to `RESULTS_DIR/bioscan_report_YYYYMMDD.html` (root, not a timestamped subfolder).
+
+```bash
+python3 generate_html_report.py
+python3 generate_html_report.py --exclude-bge         # exclude BGEP/BGEG/BGKU/BGPT rows
+python3 generate_html_report.py --output /path/to/report.html
+```
+
+---
+
+### `generate_summary_report.py`
+Markdown pipeline report with the same eight sections as the HTML version. Useful for sharing in a repository or with colleagues who prefer plain text.
+
+Output is written to `RESULTS_DIR/bioscan_summary_report_YYYYMMDD.md` (root, not a timestamped subfolder).
+
+```bash
+python3 generate_summary_report.py
+python3 generate_summary_report.py --exclude-bge      # exclude BGEP/BGEG/BGKU/BGPT rows
+python3 generate_summary_report.py --output /path/to/report.md
 ```
 
 ---
