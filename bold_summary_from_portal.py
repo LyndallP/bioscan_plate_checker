@@ -233,20 +233,18 @@ def main():
         help='Exclude BGE partner plates (BGEP, BGEG, BGKU, BGPT) from output')
     args = parser.parse_args()
 
-    today = datetime.datetime.now().strftime('%Y%m%d')
-    os.makedirs(config.RESULTS_DIR, exist_ok=True)
+    run_ts  = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+    run_dir = os.path.join(config.RESULTS_DIR, run_ts)
+    os.makedirs(run_dir, exist_ok=True)
 
     df       = load_portal_dump(args.input, partner=args.partner,
                                 exclude_bge=args.exclude_bge)
     plate_df = build_plate_summary(df)
 
     # Save outputs
-    report_path  = os.path.join(config.RESULTS_DIR,
-                                f'bold_summary_report_{today}.txt')
-    no_bin_path  = os.path.join(config.RESULTS_DIR,
-                                f'bold_missing_bin_{today}.csv')
-    plate_path   = os.path.join(config.RESULTS_DIR,
-                                f'bold_plate_summary_{today}.csv')
+    report_path  = os.path.join(run_dir, f'bold_summary_report_{run_ts}.txt')
+    no_bin_path  = os.path.join(run_dir, f'bold_missing_bin_{run_ts}.csv')
+    plate_path   = os.path.join(run_dir, f'bold_plate_summary_{run_ts}.csv')
 
     no_bin_df = df[df['bold_uploaded'] & ~df['has_bin']][[
         _SPECIMEN_COL, 'plate_id', 'partner', 'upload_date', 'bin_date',
@@ -258,7 +256,7 @@ def main():
 
     generate_report(df, plate_df, args.partner, report_path)
 
-    print(f"\nAll outputs written to {config.RESULTS_DIR}:")
+    print(f"\nAll outputs written to {run_dir}:")
     print(f"  {report_path}")
     print(f"  {no_bin_path}")
     print(f"  {plate_path}")

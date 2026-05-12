@@ -582,8 +582,9 @@ def main():
         help='Exclude BGE partner plates (BGEP, BGEG, BGKU, BGPT) from output')
     args = parser.parse_args()
 
-    today = datetime.datetime.now().strftime('%Y%m%d')
-    os.makedirs(config.RESULTS_DIR, exist_ok=True)
+    run_ts  = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+    run_dir = os.path.join(config.RESULTS_DIR, run_ts)
+    os.makedirs(run_dir, exist_ok=True)
 
     print("Loading portal plate list...")
     portal_plates = load_portal_plates(exclude_bge=args.exclude_bge)
@@ -634,16 +635,16 @@ def main():
         print(f"  Plates 0% pass       : "
               f"{(seq['pass_rate']==0).sum()}")
 
-    partner_tag = args.partner if args.partner != 'ALL' else 'ALL'
-    summary_path = os.path.join(config.RESULTS_DIR,
-        f'plate_summary_all_{partner_tag}_{today}.csv')
-    cats_path = os.path.join(config.RESULTS_DIR,
-        f'plate_summary_categories_{partner_tag}_{today}.csv')
+    partner_tag  = args.partner if args.partner != 'ALL' else 'ALL'
+    summary_path = os.path.join(run_dir,
+        f'plate_summary_all_{partner_tag}_{run_ts}.csv')
+    cats_path    = os.path.join(run_dir,
+        f'plate_summary_categories_{partner_tag}_{run_ts}.csv')
 
     df_summary.to_csv(summary_path, index=False)
     df_categories.to_csv(cats_path, index=False)
 
-    print(f"\nOutputs:")
+    print(f"\nOutputs written to {run_dir}:")
     print(f"  {summary_path}")
     print(f"  {cats_path}")
 

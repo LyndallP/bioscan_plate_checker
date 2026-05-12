@@ -235,8 +235,9 @@ def main():
         verbose=args.verbose,
     )
 
-    today = datetime.datetime.now().strftime('%Y%m%d')
-    os.makedirs(config.RESULTS_DIR, exist_ok=True)
+    run_ts  = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+    run_dir = os.path.join(config.RESULTS_DIR, run_ts)
+    os.makedirs(run_dir, exist_ok=True)
 
     # Summary
     print("\nBATCH SUMMARY")
@@ -260,13 +261,11 @@ def main():
     print(f"  Cat3 (absent from UMI)    : {df_summary['n_cat3_absent'].sum()}")
 
     # Save
-    spec_path = os.path.join(config.RESULTS_DIR,
-                             f'missing_specimens_categorised_{today}.csv')
-    summ_path = os.path.join(config.RESULTS_DIR,
-                             f'missing_specimens_batch_summary_{today}.csv')
+    spec_path = os.path.join(run_dir, f'missing_specimens_categorised_{run_ts}.csv')
+    summ_path = os.path.join(run_dir, f'missing_specimens_batch_summary_{run_ts}.csv')
     df_specimens.to_csv(spec_path, index=False)
     df_summary.to_csv(summ_path, index=False)
-    print(f"\nOutputs written:")
+    print(f"\nOutputs written to {run_dir}:")
     print(f"  {spec_path}")
     print(f"  {summ_path}")
 

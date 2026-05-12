@@ -24,8 +24,18 @@ from utils import is_bge_plate
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _latest(pattern, results_dir):
-    files = sorted(glob.glob(os.path.join(results_dir, pattern)))
-    return files[-1] if files else None
+    """Return the most recently modified file matching pattern.
+
+    Searches both the root of results_dir and one level of timestamped
+    subdirectories (YYYYMMDD_HHMMSS/), returning whichever match has the
+    highest mtime. Root-level files (e.g. portal_plates_from_dump.csv,
+    bold_workbench_combined.csv) are found correctly because they live in root.
+    """
+    candidates = (
+        glob.glob(os.path.join(results_dir, pattern)) +
+        glob.glob(os.path.join(results_dir, '*', pattern))
+    )
+    return max(candidates, key=os.path.getmtime) if candidates else None
 
 
 def _read(path, **kwargs):
