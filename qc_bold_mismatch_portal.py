@@ -48,15 +48,23 @@ def find_latest_dump(results_dir):
 
 
 def clean_partner(val):
-    """Strip list brackets from portal partner field e.g. ['FACE'] -> FACE."""
+    """Extract BIOSCAN 4-letter code from portal recordset field.
+    Field is e.g. "['FRBX', 'DS-CECIDOEU']" - ignore DS- dataset codes."""
+    import re
     if not val or str(val) in ('None', 'nan', ''):
         return None
-    val = str(val).strip().strip('[]').strip().strip("'\"")
-    import re
-    # Strip leading non-standard letter (SCAMP->CAMP, BNHMG->NHMG)
-    if re.match(r'[A-Z][A-Z]{4}$', val):
-        val = val[1:]
-    return val or None
+    tokens = re.findall(r"['\"]([^'\"]+)['\"]", str(val))
+    if not tokens:
+        tokens = [str(val).strip().strip("[]'\"")]
+    for token in tokens:
+        token = token.strip()
+        if token.startswith('DS-') or not token:
+            continue
+        if re.match(r'[A-Z][A-Z]{4}$', token):
+            token = token[1:]
+        if re.match(r'^[A-Z]{4}$', token):
+            return token
+    return None
 
 
 def extract_partner_from_rack(rack_id):
@@ -181,6 +189,33 @@ def main():
     no_seq = failed[~has_seq]
     print(f"\nQC-FAILED specimens with NO sequence on BOLD: {len(no_seq):,} (expected)")
 
+    # Cross-reference with plate_summary_all — a specimen may appear FAILED
+    # in the portal QC field (latest batch) but have PASSED in an earlier batch.
+    print(f"\nCross-referencing with plate_summary_all...")
+    ps_path = None
+    for pat in [
+        os.path.join(config.RESULTS_DIR, 'plate_summary_all_ALL_*.csv'),
+        os.path.join(config.RESULTS_DIR, '*', 'plate_summary_all_ALL_*.csv'),
+    ]:
+        candidates = sorted(glob.glob(pat))
+        if candidates:
+            ps_path = max(candidates, key=os.path.getmtime)
+            break
+
+    if ps_path and len(mismatch) > 0:
+        print(f"  Using: {os.path.basename(ps_path)}")
+        ps = pd.read_csv(ps_path, dtype=str)
+        ps['pass_count'] = pd.to_numeric(ps['pass_count'], errors='coerce')
+        plates_with_pass = set(ps[ps['pass_count'].fillna(0) > 0]['plate_id'].tolist())
+        mismatch['plate_has_pass_in_another_batch'] = mismatch['plate_id'].isin(plates_with_pass)
+        n_multi = int(mismatch['plate_has_pass_in_another_batch'].sum())
+        n_genuine = int((~mismatch['plate_has_pass_in_another_batch']).sum())
+        print(f"  Plate had PASS in another batch (likely multi-batch artefact): {n_multi:,}")
+        print(f"  Plate NEVER passed in any batch (genuinely concerning):         {n_genuine:,}")
+    else:
+        mismatch['plate_has_pass_in_another_batch'] = None
+        print("  plate_summary_all not found — skipping cross-reference")
+
     # Save output
     if args.output is None:
         args.output = os.path.join(
@@ -192,7 +227,8 @@ def main():
                               _BOLD_NUC_COL, _BOLD_BIN_COL,
                               _BOLD_SPECIES, _BOLD_FAMILY, _BOLD_ORDER,
                               _BOLD_UPLOAD, _SUBMIT_COL,
-                              'has_bin', 'has_taxonomy'] if c in mismatch.columns]
+                              'has_bin', 'has_taxonomy',
+                              'plate_has_pass_in_another_batch'] if c in mismatch.columns]
 
     if len(mismatch) > 0:
         mismatch[out_cols].to_csv(args.output, index=False)
