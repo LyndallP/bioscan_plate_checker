@@ -70,6 +70,12 @@ def clean_seq(seq):
     return re.sub(r'[\s\-]', '', str(seq).upper())
 
 
+def reverse_complement(seq):
+    """Return reverse complement of a DNA sequence."""
+    complement = str.maketrans('ACGTN', 'TGCAN')
+    return seq.translate(complement)[::-1]
+
+
 def pct_identity(seq1, seq2):
     """
     Calculate percent identity between two sequences.
@@ -283,43 +289,63 @@ def run_comparison(portal_df, qc_files, verbose=False):
             })
             continue
 
-        # Compare against each batch
-        identities = {}
+        # Compare against each batch — both forward and reverse complement
+        identities    = {}
+        rc_identities = {}
         for batch, qc_seq in batch_data.items():
             qc_seq_clean = clean_seq(qc_seq)
             if bold_seq and qc_seq_clean:
-                identities[batch] = pct_identity(bold_seq, qc_seq_clean)
+                fwd = pct_identity(bold_seq, qc_seq_clean)
+                rc  = pct_identity(bold_seq, reverse_complement(qc_seq_clean))
+                identities[batch]    = fwd
+                rc_identities[batch] = rc
             else:
-                identities[batch] = 0.0
+                identities[batch]    = 0.0
+                rc_identities[batch] = 0.0
 
-        identical_batches = [b for b, pct in identities.items() if pct == 100.0]
+        # Best forward match
+        identical_batches = [b for b, p in identities.items() if p == 100.0]
         best_batch = max(identities, key=identities.get) if identities else ''
-        best_pct = identities[best_batch] if best_batch else None
+        best_pct   = identities[best_batch] if best_batch else None
 
+        # Best reverse complement match
+        rc_identical_batches = [b for b, p in rc_identities.items() if p == 100.0]
+        rc_best_batch = max(rc_identities, key=rc_identities.get) if rc_identities else ''
+        rc_best_pct   = rc_identities[rc_best_batch] if rc_best_batch else None
+
+        # Status — forward takes priority over RC
         if identical_batches:
             status = 'IDENTICAL'
+        elif rc_identical_batches:
+            status = 'IDENTICAL_RC'
         elif best_pct is not None and best_pct >= 95:
             status = 'CLOSE'
+        elif rc_best_pct is not None and rc_best_pct >= 95:
+            status = 'CLOSE_RC'
         elif best_pct is not None and best_pct > 0:
             status = 'DIVERGENT'
         else:
             status = 'NO_SEQUENCE'
 
         results.append({
-            'specimen_id':       sid,
-            'plate_id':          row['plate_id'],
-            'partner':           row['partner'],
-            'bold_upload_date':  row.get('bold_upload_date'),
-            'bold_bin_uri':      row.get('bold_bin_uri'),
-            'bold_seq_length':   bold_len,
-            'n_batches_in_qc':   n_batches,
-            'batches_in_qc':     ','.join(sorted(batch_data.keys())),
-            'any_identical':     bool(identical_batches),
-            'identical_batches': ','.join(sorted(identical_batches)),
-            'best_pct_identity': best_pct,
-            'best_batch':        best_batch,
-            'all_pct_identities': json.dumps(identities),
-            'status':            status,
+            'specimen_id':          sid,
+            'plate_id':             row['plate_id'],
+            'partner':              row['partner'],
+            'bold_upload_date':     row.get('bold_upload_date'),
+            'bold_bin_uri':         row.get('bold_bin_uri'),
+            'bold_seq_length':      bold_len,
+            'n_batches_in_qc':      n_batches,
+            'batches_in_qc':        ','.join(sorted(batch_data.keys())),
+            'any_identical':        bool(identical_batches),
+            'identical_batches':    ','.join(sorted(identical_batches)),
+            'best_pct_identity':    best_pct,
+            'best_batch':           best_batch,
+            'all_pct_identities':   json.dumps(identities),
+            'rc_any_identical':     bool(rc_identical_batches),
+            'rc_identical_batches': ','.join(sorted(rc_identical_batches)),
+            'rc_best_pct_identity': rc_best_pct,
+            'rc_best_batch':        rc_best_batch,
+            'status':               status,
         })
 
     return pd.DataFrame(results)
@@ -341,7 +367,7 @@ def print_summary(df, partner=None):
         print(f"  {status:20s}: {n:6,} ({pct:.1f}%)")
 
     print()
-    not_identical = df[df['status'].isin(['CLOSE','DIVERGENT'])]
+    not_identical = df[df['status'].isin(['CLOSE','CLOSE_RC','DIVERGENT'])]
     if len(not_identical) > 0:
         print(f"Non-identical sequences ({len(not_identical):,}):")
         print(f"  Best % identity distribution:")
