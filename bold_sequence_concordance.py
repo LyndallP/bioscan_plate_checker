@@ -261,12 +261,17 @@ def run_comparison(portal_df, fasta_files, verbose=False):
 
         if identical_batches:
             status = 'IDENTICAL'
-        elif best_pct is not None and best_pct >= 99.0:
+        elif overlap_right == 100.0:
+            status = 'TRIM_5PRIME'    # extra bases at 5' end of FASTA only
+        elif overlap_left == 100.0:
+            status = 'TRIM_3PRIME'    # extra bases at 3' end of FASTA only
+        elif (overlap_right is not None and overlap_right >= 99.0) or \
+             (overlap_left  is not None and overlap_left  >= 99.0):
             status = 'NEAR_IDENTICAL'
         elif best_pct is not None and best_pct >= 95.0:
             status = 'CLOSE'
         elif best_pct is not None and best_pct > 0:
-            status = 'DIFFERENT'
+            status = 'DIFFERENT'      # genuinely different sequence from QC rerun
         else:
             status = 'NO_SEQUENCE'
 
@@ -374,8 +379,28 @@ def main():
     results = run_comparison(portal_df, fasta_files, verbose=args.verbose)
     print_summary(results, partner=args.partner)
 
-    results.to_csv(args.output, index=False)
-    print(f"\nOutput: {args.output} ({len(results):,} rows)")
+    # Save only non-identical specimens to CSV — actionable cases only
+    # IDENTICAL rows are captured in the summary printed above
+    identical_statuses = {'IDENTICAL'}
+    to_save = results[~results['status'].isin(identical_statuses)].copy()
+    to_save.to_csv(args.output, index=False)
+
+    # Also save a summary TXT alongside the CSV
+    summary_path = args.output.replace('.csv', '_summary.txt')
+    with open(summary_path, 'w') as f:
+        f.write(f'BOLD SEQUENCE CONCORDANCE SUMMARY\n')
+        f.write(f'Generated: {datetime.datetime.now().strftime("%Y-%m-%d %H:%M")}\n')
+        f.write(f'Partner filter: {args.partner or "ALL (BGE excluded)"}\n')
+        f.write(f'Portal dump: {os.path.basename(dump_path)}\n')
+        f.write(f'\nTotal specimens on BOLD: {len(results):,}\n')
+        for status, n in results['status'].value_counts().items():
+            f.write(f'  {status:20s}: {n:6,} ({100*n/len(results):.1f}%)\n')
+        f.write(f'\nNon-identical saved to: {args.output}\n')
+        f.write(f'  {len(to_save):,} rows (excludes IDENTICAL)\n')
+
+    print(f'\nCSV output (non-identical only): {args.output}')
+    print(f'  {len(to_save):,} rows saved (IDENTICAL excluded)')
+    print(f'Summary log: {summary_path}')
 
 
 if __name__ == '__main__':
