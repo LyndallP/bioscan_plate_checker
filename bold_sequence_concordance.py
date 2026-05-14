@@ -1,37 +1,26 @@
 """
 bold_sequence_concordance.py
 
-Compares sequences uploaded to BOLD (from portal dump bold_nuc column)
-against QC sequences in BOLDfiltered_metadata_batch*.csv files.
+Compares sequences currently on BOLD (from portal dump bold_nuc column)
+against the sequences in BOLD_filtered_sequences_batch*.fasta files —
+the actual FASTA files that were uploaded to BOLD.
 
-For each specimen on BOLD:
-  - Finds all BOLDfiltered batch files containing that specimen
-  - Compares the BOLD sequence against the QC sequence in each batch
-  - Reports: identical match, % identity, which batch(es) match
+Since BOLD_filtered_sequences_batch*.fasta is the direct upload source,
+any non-100% match is a genuine discrepancy worth investigating.
 
-Output columns:
-    specimen_id         — e.g. BAYS_067_A1
-    plate_id            — e.g. BAYS_067
-    partner             — e.g. BAYS
-    bold_upload_date    — date sequence was uploaded to BOLD
-    bold_seq_length     — length of sequence on BOLD
-    n_batches_in_qc     — how many BOLDfiltered files contain this specimen
-    batches_in_qc       — comma-separated list of batch names
-    any_identical       — True if any batch has 100% identity
-    identical_batches   — which batches have identical sequence
-    best_pct_identity   — highest % identity across all batches
-    best_batch          — batch with highest % identity
-    all_pct_identities  — per-batch % identities (JSON)
-    status              — IDENTICAL / CLOSE (>95%) / DIVERGENT / QC_ONLY / BOLD_ONLY
+For specimens in multiple batches, all are checked and the output records
+which batch(es) have an identical match.
+
+Status values:
+    IDENTICAL      — 100% match in at least one batch FASTA
+    NEAR_IDENTICAL — >99% match (likely minor formatting difference)
+    CLOSE          — 95-99% match
+    DIFFERENT      — found in FASTA but sequence differs (<95%)
+    BOLD_ONLY      — on BOLD but not found in any batch FASTA
 
 Usage:
-    # Test on CAMP partner first
     python3 bold_sequence_concordance.py --partner CAMP
-
-    # All partners (excluding BGE)
     python3 bold_sequence_concordance.py --exclude-bge
-
-    # Specific portal dump
     python3 bold_sequence_concordance.py --input /path/to/sts_manifests.tsv --exclude-bge
 """
 
@@ -47,66 +36,35 @@ from collections import defaultdict
 import config
 from utils import is_bge_plate
 
-# ── Paths ─────────────────────────────────────────────────────────────────────
-QC_DIR = '/lustre/scratch126/tol/teams/lawniczak/projects/bioscan/bioscan_qc/qc_reports_rerun_Feb2026'
+QC_DIR         = '/lustre/scratch126/tol/teams/lawniczak/projects/bioscan/bioscan_qc/qc_reports_rerun_Feb2026'
+_FASTA_PATTERN = 'BOLD_filtered_sequences_batch*.fasta'
 
-# ── Column names ──────────────────────────────────────────────────────────────
 _SPECIMEN_COL    = 'sts_specimen.id'
 _RACK_COL        = 'sts_rackid'
 _BOLD_NUC_COL    = 'bold_nuc'
 _BOLD_UPLOAD_COL = 'bold_sequence_upload_date'
 _BOLD_BIN_COL    = 'bold_bin_uri'
 _PARTNER_COL     = 'bold_bold_recordset_code_arr'
-_QC_PID_COL      = 'pid'
-_QC_SEQ_COL      = 'sequence'
 
-
-# ── Sequence comparison ───────────────────────────────────────────────────────
 
 def clean_seq(seq):
-    """Uppercase, strip whitespace and gap characters."""
     if not seq or str(seq) in ('None', 'nan', ''):
         return None
-    return re.sub(r'[\s\-]', '', str(seq).upper())
+    return re.sub(r'\s', '', str(seq).upper())
 
 
-def reverse_complement(seq):
-    """Return reverse complement of a DNA sequence."""
-    complement = str.maketrans('ACGTN', 'TGCAN')
-    return seq.translate(complement)[::-1]
-
-
-def pct_identity(seq1, seq2, max_offset=10):
-    """
-    Calculate percent identity between two sequences.
-    Tries small positional offsets (±max_offset) to handle single-bp
-    insertions/deletions that would otherwise cause position-by-position
-    comparison to fail despite near-identical sequences.
-    Uses the shorter overlapping region as denominator.
-    Returns float 0-100.
-    """
+def pct_identity(seq1, seq2):
+    """Strict position-by-position percent identity, shorter length as denominator."""
     if not seq1 or not seq2:
         return 0.0
-    best = 0.0
-    for offset in range(-max_offset, max_offset + 1):
-        if offset >= 0:
-            s1, s2 = seq1[offset:], seq2
-        else:
-            s1, s2 = seq1, seq2[-offset:]
-        compare_len = min(len(s1), len(s2))
-        if compare_len == 0:
-            continue
-        matches = sum(a == b for a, b in zip(s1[:compare_len], s2[:compare_len]))
-        pct = round(100 * matches / compare_len, 2)
-        if pct > best:
-            best = pct
-    return best
+    n = min(len(seq1), len(seq2))
+    if n == 0:
+        return 0.0
+    matches = sum(a == b for a, b in zip(seq1[:n], seq2[:n]))
+    return round(100 * matches / n, 4)
 
-
-# ── Partner extraction ────────────────────────────────────────────────────────
 
 def clean_partner(val):
-    """Extract 4-letter BIOSCAN partner code from recordset field."""
     if not val or str(val) in ('None', 'nan', ''):
         return None
     tokens = re.findall(r"['\"]([^'\"]+)['\"]", str(val))
@@ -130,50 +88,47 @@ def extract_partner_from_rack(rack_id):
     return m.group(1) if m else None
 
 
-# ── QC file loading ───────────────────────────────────────────────────────────
-
-def find_bold_filtered_files(qc_dir):
-    """
-    Find all BOLDfiltered_metadata_*.csv files.
-    Returns dict: batch_name -> filepath
-    Excludes merged/RnD batches.
-    """
-    pattern = os.path.join(qc_dir, '**', 'BOLDfiltered_metadata_*.csv')
+def find_fasta_files(qc_dir):
+    pattern = os.path.join(qc_dir, '**', _FASTA_PATTERN)
     files = glob.glob(pattern, recursive=True)
     result = {}
-    skip = {'merged', 'rnd', 'r&d', 'repeat'}
+    skip = {'merged', 'rnd', 'r&d'}
     for f in sorted(files):
         batch = os.path.basename(os.path.dirname(f))
-        # Skip merged/RnD batches
         if any(s in batch.lower() for s in skip):
             continue
         result[batch] = f
     return result
 
 
-def load_qc_sequences(filepath, partner_filter=None):
-    """
-    Load pid -> sequence mapping from a BOLDfiltered file.
-    Optionally filter to a specific partner.
-    Returns dict: pid -> sequence string
-    """
+def parse_fasta(filepath, partner_filter=None):
+    result = {}
+    current_id = None
+    current_seq = []
     try:
-        df = pd.read_csv(filepath, dtype=str, usecols=[_QC_PID_COL, _QC_SEQ_COL])
+        with open(filepath) as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                if line.startswith('>'):
+                    if current_id is not None:
+                        result[current_id] = ''.join(current_seq).upper()
+                    current_id = line[1:].split()[0]
+                    current_seq = []
+                else:
+                    current_seq.append(line)
+            if current_id is not None:
+                result[current_id] = ''.join(current_seq).upper()
     except Exception as e:
+        print(f"  Warning: could not read {filepath}: {e}")
         return {}
-
-    df = df.dropna(subset=[_QC_PID_COL, _QC_SEQ_COL])
-
     if partner_filter:
-        # Filter by partner prefix in pid
-        mask = df[_QC_PID_COL].str.startswith(partner_filter + '_') | \
-               df[_QC_PID_COL].str.startswith('TOL-' + partner_filter + '-')
-        df = df[mask]
+        result = {k: v for k, v in result.items()
+                  if k.startswith(partner_filter + '_') or
+                  k.startswith('TOL-' + partner_filter + '-')}
+    return result
 
-    return dict(zip(df[_QC_PID_COL], df[_QC_SEQ_COL]))
-
-
-# ── Portal dump loading ───────────────────────────────────────────────────────
 
 def find_latest_dump(results_dir):
     candidates = sorted(glob.glob(os.path.join(results_dir, 'sts_manifests_*.tsv')))
@@ -181,283 +136,230 @@ def find_latest_dump(results_dir):
 
 
 def load_portal_sequences(dump_path, partner_filter=None, exclude_bge=False):
-    """
-    Load specimens with BOLD sequences from portal dump.
-    Returns DataFrame with specimen_id, plate_id, partner,
-    bold_nuc, bold_upload_date, bold_bin_uri.
-    """
     print(f"Reading portal dump: {os.path.basename(dump_path)}")
-
-    # Check available columns
     peek = pd.read_csv(dump_path, sep='\t', dtype=str, nrows=0)
     use_cols = [c for c in [_SPECIMEN_COL, _RACK_COL, _BOLD_NUC_COL,
                              _BOLD_UPLOAD_COL, _BOLD_BIN_COL, _PARTNER_COL]
                 if c in peek.columns]
-
-    df = pd.read_csv(dump_path, sep='\t', dtype=str, usecols=use_cols,
-                     low_memory=False)
+    df = pd.read_csv(dump_path, sep='\t', dtype=str, usecols=use_cols, low_memory=False)
     print(f"  {len(df):,} rows loaded")
 
-    # Clean None strings
     for col in df.columns:
         df[col] = df[col].replace({'None': None, 'nan': None, '': None})
 
-    # Extract plate_id and partner
     df['plate_id'] = df[_RACK_COL] if _RACK_COL in df.columns else None
-    df['partner'] = df[_PARTNER_COL].apply(clean_partner) \
-        if _PARTNER_COL in df.columns else None
-    missing_partner = df['partner'].isna()
-    if missing_partner.any():
-        df.loc[missing_partner, 'partner'] = \
-            df.loc[missing_partner, 'plate_id'].apply(extract_partner_from_rack)
+    df['partner'] = df[_PARTNER_COL].apply(clean_partner) if _PARTNER_COL in df.columns else None
+    missing = df['partner'].isna()
+    if missing.any():
+        df.loc[missing, 'partner'] = df.loc[missing, 'plate_id'].apply(extract_partner_from_rack)
 
-    # Exclude BGE
     if exclude_bge:
-        n_before = len(df)
+        n = len(df)
         df = df[~df['plate_id'].apply(lambda x: is_bge_plate(str(x)) if x else False)]
-        print(f"  Excluded {n_before - len(df):,} BGE rows")
+        print(f"  Excluded {n - len(df):,} BGE rows")
 
-    # Filter to partner
     if partner_filter:
         df = df[df['partner'] == partner_filter]
-        print(f"  Filtered to partner {partner_filter}: {len(df):,} rows")
+        print(f"  Filtered to {partner_filter}: {len(df):,} rows")
 
-    # Keep only specimens with BOLD sequence
     df = df[df[_BOLD_NUC_COL].notna()]
     print(f"  {len(df):,} specimens with BOLD sequence")
 
-    # Use specimen ID column
-    df = df.rename(columns={_SPECIMEN_COL: 'specimen_id',
-                             _BOLD_NUC_COL: 'bold_nuc',
-                             _BOLD_UPLOAD_COL: 'bold_upload_date',
-                             _BOLD_BIN_COL: 'bold_bin_uri'})
-
+    df = df.rename(columns={
+        _SPECIMEN_COL: 'specimen_id',
+        _BOLD_NUC_COL: 'bold_nuc',
+        _BOLD_UPLOAD_COL: 'bold_upload_date',
+        _BOLD_BIN_COL: 'bold_bin_uri',
+    })
     return df[['specimen_id', 'plate_id', 'partner',
                'bold_nuc', 'bold_upload_date', 'bold_bin_uri']].copy()
 
 
-# ── Main comparison ───────────────────────────────────────────────────────────
-
-def run_comparison(portal_df, qc_files, verbose=False):
-    """
-    For each specimen in portal_df, find it in QC batch files and compare sequences.
-    Returns results DataFrame.
-    """
+def run_comparison(portal_df, fasta_files, verbose=False):
     total = len(portal_df)
-    print(f"\nComparing {total:,} BOLD specimens against {len(qc_files)} QC batch files...")
-    print("Loading QC sequences from batch files...")
+    print(f"\nComparing {total:,} BOLD specimens against {len(fasta_files)} batch FASTA files...")
+    print("Loading FASTA sequences...")
 
-    # Build index: specimen_id -> {batch: sequence}
-    # Load all QC files into memory (filtered to relevant specimens)
     specimen_ids = set(portal_df['specimen_id'].dropna())
+    fasta_index = defaultdict(dict)
 
-    # For efficiency, load all batches and index by specimen
-    qc_index = defaultdict(dict)  # specimen_id -> {batch: seq}
-
-    for i, (batch, filepath) in enumerate(sorted(qc_files.items())):
-        seqs = load_qc_sequences(filepath)
+    for i, (batch, filepath) in enumerate(sorted(fasta_files.items())):
+        seqs = parse_fasta(filepath)
         found = 0
         for pid, seq in seqs.items():
             if pid in specimen_ids:
-                qc_index[pid][batch] = seq
+                fasta_index[pid][batch] = seq
                 found += 1
         if verbose and found > 0:
             print(f"  {batch}: {found} matching specimens")
-        elif i % 20 == 0:
-            print(f"  Processed {i+1}/{len(qc_files)} batch files...")
+        elif (i + 1) % 20 == 0:
+            print(f"  Processed {i+1}/{len(fasta_files)} FASTA files...")
 
-    print(f"\n  {len(qc_index):,} unique specimens found in QC files")
-    print(f"  {total - len(qc_index):,} specimens on BOLD but not in any QC file")
-    print(f"\nRunning sequence comparisons...")
+    print(f"\n  {len(fasta_index):,} specimens found in batch FASTA files")
+    print(f"  {total - len(fasta_index):,} on BOLD but not in any FASTA")
+    print(f"\nRunning comparisons...")
 
     results = []
     for _, row in portal_df.iterrows():
-        sid = row['specimen_id']
+        sid      = row['specimen_id']
         bold_seq = clean_seq(row['bold_nuc'])
         bold_len = len(bold_seq) if bold_seq else 0
-
-        batch_data = qc_index.get(sid, {})
-        n_batches = len(batch_data)
+        batch_data = fasta_index.get(sid, {})
+        n_batches  = len(batch_data)
 
         if n_batches == 0:
-            # On BOLD but not in any QC file
             results.append({
-                'specimen_id':       sid,
-                'plate_id':          row['plate_id'],
-                'partner':           row['partner'],
-                'bold_upload_date':  row.get('bold_upload_date'),
-                'bold_bin_uri':      row.get('bold_bin_uri'),
-                'bold_seq_length':   bold_len,
-                'n_batches_in_qc':   0,
-                'batches_in_qc':     '',
-                'any_identical':     False,
-                'identical_batches': '',
-                'best_pct_identity': None,
-                'best_batch':        '',
-                'all_pct_identities':'{}',
-                'status':            'BOLD_ONLY',
+                'specimen_id':        sid,
+                'plate_id':           row['plate_id'],
+                'partner':            row['partner'],
+                'bold_upload_date':   row.get('bold_upload_date'),
+                'bold_bin_uri':       row.get('bold_bin_uri'),
+                'bold_seq_length':    bold_len,
+                'n_batches_in_fasta': 0,
+                'batches_in_fasta':   '',
+                'any_identical':      False,
+                'identical_batches':  '',
+                'best_pct_identity':  None,
+                'best_batch':         '',
+                'fasta_seq_length':   None,
+                'length_diff':        None,
+                'all_pct_identities': '{}',
+                'status':             'BOLD_ONLY',
             })
             continue
 
-        # Compare against each batch — both forward and reverse complement
         identities    = {}
-        rc_identities = {}
-        for batch, qc_seq in batch_data.items():
-            qc_seq_clean = clean_seq(qc_seq)
-            if bold_seq and qc_seq_clean:
-                fwd = pct_identity(bold_seq, qc_seq_clean)
-                rc  = pct_identity(bold_seq, reverse_complement(qc_seq_clean))
-                identities[batch]    = fwd
-                rc_identities[batch] = rc
+        fasta_lengths = {}
+        for batch, fasta_seq in batch_data.items():
+            fasta_clean = clean_seq(fasta_seq)
+            if bold_seq and fasta_clean:
+                identities[batch]    = pct_identity(bold_seq, fasta_clean)
+                fasta_lengths[batch] = len(fasta_clean)
             else:
                 identities[batch]    = 0.0
-                rc_identities[batch] = 0.0
+                fasta_lengths[batch] = None
 
-        # Best forward match
         identical_batches = [b for b, p in identities.items() if p == 100.0]
-        best_batch = max(identities, key=identities.get) if identities else ''
-        best_pct   = identities[best_batch] if best_batch else None
+        best_batch  = max(identities, key=identities.get) if identities else ''
+        best_pct    = identities[best_batch] if best_batch else None
+        best_flen   = fasta_lengths.get(best_batch)
+        lendiff     = (bold_len - best_flen) if (bold_len and best_flen) else None
 
-        # Best reverse complement match
-        rc_identical_batches = [b for b, p in rc_identities.items() if p == 100.0]
-        rc_best_batch = max(rc_identities, key=rc_identities.get) if rc_identities else ''
-        rc_best_pct   = rc_identities[rc_best_batch] if rc_best_batch else None
-
-        # Status — forward takes priority over RC
         if identical_batches:
             status = 'IDENTICAL'
-        elif rc_identical_batches:
-            status = 'IDENTICAL_RC'
-        elif best_pct is not None and best_pct >= 95:
+        elif best_pct is not None and best_pct >= 99.0:
+            status = 'NEAR_IDENTICAL'
+        elif best_pct is not None and best_pct >= 95.0:
             status = 'CLOSE'
-        elif rc_best_pct is not None and rc_best_pct >= 95:
-            status = 'CLOSE_RC'
         elif best_pct is not None and best_pct > 0:
-            status = 'DIVERGENT'
+            status = 'DIFFERENT'
         else:
             status = 'NO_SEQUENCE'
 
         results.append({
-            'specimen_id':          sid,
-            'plate_id':             row['plate_id'],
-            'partner':              row['partner'],
-            'bold_upload_date':     row.get('bold_upload_date'),
-            'bold_bin_uri':         row.get('bold_bin_uri'),
-            'bold_seq_length':      bold_len,
-            'n_batches_in_qc':      n_batches,
-            'batches_in_qc':        ','.join(sorted(batch_data.keys())),
-            'any_identical':        bool(identical_batches),
-            'identical_batches':    ','.join(sorted(identical_batches)),
-            'best_pct_identity':    best_pct,
-            'best_batch':           best_batch,
-            'all_pct_identities':   json.dumps(identities),
-            'rc_any_identical':     bool(rc_identical_batches),
-            'rc_identical_batches': ','.join(sorted(rc_identical_batches)),
-            'rc_best_pct_identity': rc_best_pct,
-            'rc_best_batch':        rc_best_batch,
-            'status':               status,
+            'specimen_id':        sid,
+            'plate_id':           row['plate_id'],
+            'partner':            row['partner'],
+            'bold_upload_date':   row.get('bold_upload_date'),
+            'bold_bin_uri':       row.get('bold_bin_uri'),
+            'bold_seq_length':    bold_len,
+            'n_batches_in_fasta': n_batches,
+            'batches_in_fasta':   ','.join(sorted(batch_data.keys())),
+            'any_identical':      bool(identical_batches),
+            'identical_batches':  ','.join(sorted(identical_batches)),
+            'best_pct_identity':  best_pct,
+            'best_batch':         best_batch,
+            'fasta_seq_length':   best_flen,
+            'length_diff':        lendiff,
+            'all_pct_identities': json.dumps(identities),
+            'status':             status,
         })
 
     return pd.DataFrame(results)
 
 
-# ── Summary ───────────────────────────────────────────────────────────────────
-
 def print_summary(df, partner=None):
     label = f" ({partner})" if partner else ""
+    total = len(df)
     print(f"\n{'='*60}")
     print(f"BOLD SEQUENCE CONCORDANCE SUMMARY{label}")
     print(f"{'='*60}")
-    print(f"Total specimens on BOLD:      {len(df):,}")
+    print(f"Total specimens on BOLD: {total:,}")
     print()
+    for status, n in df['status'].value_counts().items():
+        print(f"  {status:20s}: {n:6,} ({100*n/total:.1f}%)")
 
-    vc = df['status'].value_counts()
-    for status, n in vc.items():
-        pct = 100*n/len(df)
-        print(f"  {status:20s}: {n:6,} ({pct:.1f}%)")
-
-    print()
-    not_identical = df[df['status'].isin(['CLOSE','CLOSE_RC','DIVERGENT'])]
-    if len(not_identical) > 0:
-        print(f"Non-identical sequences ({len(not_identical):,}):")
-        print(f"  Best % identity distribution:")
-        pcts = not_identical['best_pct_identity'].dropna()
-        print(f"    Mean:   {pcts.mean():.2f}%")
-        print(f"    Median: {pcts.median():.2f}%")
-        print(f"    Min:    {pcts.min():.2f}%")
+    non_id = df[df['status'].isin(['NEAR_IDENTICAL', 'CLOSE', 'DIFFERENT'])]
+    if len(non_id) > 0:
+        print(f"\nNon-identical sequences ({len(non_id):,}):")
+        pcts = non_id['best_pct_identity'].dropna().astype(float)
+        print(f"  Mean:   {pcts.mean():.4f}%")
+        print(f"  Median: {pcts.median():.4f}%")
+        print(f"  Min:    {pcts.min():.4f}%")
         print()
-        print(f"  By partner:")
-        print(not_identical.groupby('partner').size().sort_values(ascending=False).to_string())
+        ld = non_id['length_diff'].dropna().astype(float)
+        if len(ld):
+            print(f"  Length diff (BOLD - FASTA): mean {ld.mean():.1f}bp, range {ld.min():.0f} to {ld.max():.0f}bp")
         print()
-        print(f"  Sample divergent specimens:")
-        show = not_identical.nsmallest(10, 'best_pct_identity')
-        print(show[['specimen_id','partner','best_pct_identity',
-                    'best_batch','bold_seq_length']].to_string(index=False))
+        print("  By partner:")
+        print(non_id.groupby('partner').size().sort_values(ascending=False).to_string())
+        print()
+        print("  Most divergent:")
+        worst = non_id.nsmallest(10, 'best_pct_identity')
+        print(worst[['specimen_id', 'partner', 'best_pct_identity',
+                      'bold_seq_length', 'fasta_seq_length',
+                      'length_diff', 'best_batch']].to_string(index=False))
 
+    bold_only = df[df['status'] == 'BOLD_ONLY']
+    if len(bold_only) > 0:
+        print(f"\nBOLD_ONLY ({len(bold_only):,}) — by partner:")
+        print(bold_only.groupby('partner').size().sort_values(ascending=False).to_string())
 
-# ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Compare BOLD sequences against QC BOLDfiltered sequences'
+        description='Compare BOLD sequences vs BOLD_filtered_sequences FASTA files'
     )
     parser.add_argument('--partner', default=None,
-        help='Run for a single partner only (e.g. CAMP) — recommended for testing')
+        help='Single partner filter e.g. CAMP')
     parser.add_argument('--exclude-bge', action='store_true',
-        help='Exclude BGE partners (BGEP, BGEG, BGKU, BGPT)')
+        help='Exclude BGE partners')
     parser.add_argument('--input', default=None,
-        help='Path to portal dump TSV (default: most recent in RESULTS_DIR)')
+        help='Portal dump TSV path')
     parser.add_argument('--output', default=None,
         help='Output CSV path')
-    parser.add_argument('--verbose', action='store_true',
-        help='Print per-batch loading progress')
+    parser.add_argument('--verbose', action='store_true')
     args = parser.parse_args()
 
     today = datetime.datetime.now().strftime('%Y%m%d')
     os.makedirs(config.RESULTS_DIR, exist_ok=True)
 
-    # Find portal dump
-    dump_path = args.input
-    if not dump_path:
-        dump_path = find_latest_dump(config.RESULTS_DIR)
+    dump_path = args.input or find_latest_dump(config.RESULTS_DIR)
     if not dump_path or not os.path.exists(dump_path):
-        print("ERROR: No portal dump found. Run read_portal_dump.py --fetch first.")
+        print("ERROR: No portal dump found.")
         return
 
-    # Output path
+    suffix = f"_{args.partner}" if args.partner else "_ALL"
     if args.output is None:
-        suffix = f"_{args.partner}" if args.partner else "_ALL"
         args.output = os.path.join(
-            config.RESULTS_DIR,
-            f'bold_sequence_concordance{suffix}_{today}.csv'
-        )
+            config.RESULTS_DIR, f'bold_sequence_concordance{suffix}_{today}.csv')
 
-    # Load portal sequences
-    portal_df = load_portal_sequences(
-        dump_path,
-        partner_filter=args.partner,
-        exclude_bge=args.exclude_bge,
-    )
-
+    portal_df = load_portal_sequences(dump_path,
+                                      partner_filter=args.partner,
+                                      exclude_bge=args.exclude_bge)
     if portal_df.empty:
-        print("No specimens found matching criteria.")
+        print("No specimens found.")
         return
 
-    # Find QC batch files
-    print(f"\nScanning QC directory: {QC_DIR}")
-    qc_files = find_bold_filtered_files(QC_DIR)
-    print(f"  Found {len(qc_files)} BOLDfiltered batch files")
+    print(f"\nScanning FASTA files in: {QC_DIR}")
+    fasta_files = find_fasta_files(QC_DIR)
+    print(f"  Found {len(fasta_files)} FASTA files")
 
-    # Run comparison
-    results = run_comparison(portal_df, qc_files, verbose=args.verbose)
-
-    # Print summary
+    results = run_comparison(portal_df, fasta_files, verbose=args.verbose)
     print_summary(results, partner=args.partner)
 
-    # Save
     results.to_csv(args.output, index=False)
-    print(f"\nOutput: {args.output}")
-    print(f"  {len(results):,} rows saved")
+    print(f"\nOutput: {args.output} ({len(results):,} rows)")
 
 
 if __name__ == '__main__':
