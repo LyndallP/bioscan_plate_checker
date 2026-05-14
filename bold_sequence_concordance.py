@@ -76,21 +76,31 @@ def reverse_complement(seq):
     return seq.translate(complement)[::-1]
 
 
-def pct_identity(seq1, seq2):
+def pct_identity(seq1, seq2, max_offset=10):
     """
     Calculate percent identity between two sequences.
-    Aligns by length — uses the shorter sequence length as denominator
-    to handle cases where BOLD sequence is trimmed vs QC sequence.
+    Tries small positional offsets (±max_offset) to handle single-bp
+    insertions/deletions that would otherwise cause position-by-position
+    comparison to fail despite near-identical sequences.
+    Uses the shorter overlapping region as denominator.
     Returns float 0-100.
     """
     if not seq1 or not seq2:
         return 0.0
-    # Compare over the length of the shorter sequence
-    min_len = min(len(seq1), len(seq2))
-    if min_len == 0:
-        return 0.0
-    matches = sum(a == b for a, b in zip(seq1[:min_len], seq2[:min_len]))
-    return round(100 * matches / min_len, 2)
+    best = 0.0
+    for offset in range(-max_offset, max_offset + 1):
+        if offset >= 0:
+            s1, s2 = seq1[offset:], seq2
+        else:
+            s1, s2 = seq1, seq2[-offset:]
+        compare_len = min(len(s1), len(s2))
+        if compare_len == 0:
+            continue
+        matches = sum(a == b for a, b in zip(s1[:compare_len], s2[:compare_len]))
+        pct = round(100 * matches / compare_len, 2)
+        if pct > best:
+            best = pct
+    return best
 
 
 # ── Partner extraction ────────────────────────────────────────────────────────
