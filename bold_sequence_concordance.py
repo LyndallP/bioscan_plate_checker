@@ -239,6 +239,13 @@ def run_comparison(portal_df, fasta_files, verbose=False):
                 identities[batch]    = 0.0
                 fasta_lengths[batch] = None
 
+        # Compute best batch first, then overlap identities
+        identical_batches = [b for b, p in identities.items() if p == 100.0]
+        best_batch  = max(identities, key=identities.get) if identities else ''
+        best_pct    = identities[best_batch] if best_batch else None
+        best_flen   = fasta_lengths.get(best_batch)
+        lendiff     = (bold_len - best_flen) if (bold_len and best_flen) else None
+
         # For the best batch, compute overlap identities:
         # left-aligned (trim 3' end of longer) and right-aligned (trim 5' end of longer)
         # These directly answer: "if you remove the length difference, is the sequence identical?"
@@ -251,12 +258,6 @@ def run_comparison(portal_df, fasta_files, verbose=False):
                 bold_seq[-n:], best_fasta_seq[-n:])) / n, 4) if n else None
         else:
             overlap_left = overlap_right = None
-
-        identical_batches = [b for b, p in identities.items() if p == 100.0]
-        best_batch  = max(identities, key=identities.get) if identities else ''
-        best_pct    = identities[best_batch] if best_batch else None
-        best_flen   = fasta_lengths.get(best_batch)
-        lendiff     = (bold_len - best_flen) if (bold_len and best_flen) else None
 
         if identical_batches:
             status = 'IDENTICAL'
