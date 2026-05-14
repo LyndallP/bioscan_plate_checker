@@ -24,18 +24,21 @@ from utils import is_bge_plate
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _latest(pattern, results_dir):
-    """Return the most recently modified file matching pattern.
-
-    Searches both the root of results_dir and one level of timestamped
-    subdirectories (YYYYMMDD_HHMMSS/), returning whichever match has the
-    highest mtime. Root-level files (e.g. portal_plates_from_dump.csv,
-    bold_workbench_combined.csv) are found correctly because they live in root.
     """
-    candidates = (
-        glob.glob(os.path.join(results_dir, pattern)) +
-        glob.glob(os.path.join(results_dir, '*', pattern))
-    )
-    return max(candidates, key=os.path.getmtime) if candidates else None
+    Find the most recently modified file matching pattern.
+    Searches both results_dir root AND one level of timestamped subfolders
+    (e.g. results_dir/20260512_143022/file.csv) so the report generator
+    works whether outputs are flat or in run-timestamped directories.
+    """
+    # Search flat in results_dir
+    flat = glob.glob(os.path.join(results_dir, pattern))
+    # Search one level of subdirectories (timestamped run folders)
+    nested = glob.glob(os.path.join(results_dir, '*', pattern))
+    all_files = flat + nested
+    if not all_files:
+        return None
+    # Sort by modification time — most recent wins
+    return max(all_files, key=os.path.getmtime)
 
 
 def _read(path, **kwargs):
@@ -443,6 +446,9 @@ def load_all(results_dir, exclude_bge):
     bold_flagged_comp  = latest('bold_flagged_comparison_*.csv')
     bold_wb_plates     = latest('bold_workbench_plates_*.csv')
     bold_report_path   = _latest('bold_workbench_report_*.txt', results_dir)
+    bold_concordance   = latest('bold_sequence_concordance_ALL_*.csv')
+    if bold_concordance.empty:
+        bold_concordance = latest('bold_sequence_concordance_*_*.csv')
 
     if exclude_bge:
         for df in [plate_status, plate_summ, plate_cats, repeat_plate]:
@@ -464,6 +470,7 @@ def load_all(results_dir, exclude_bge):
         bold_flagged_comp=bold_flagged_comp,
         bold_wb_plates=bold_wb_plates,
         bold_report_path=bold_report_path,
+        bold_concordance=bold_concordance,
     )
 
 
@@ -520,7 +527,7 @@ def build_pipeline_overview(d):
 
     # Complete partners
     if 'partner' in df.columns and 'missing_at' in df.columns and 'pipeline_stage' in df.columns:
-        complete = df.groupby('partner').apply(
+        complete = df.groupby('partner', group_keys=False).apply(
             lambda g: g['missing_at'].isna().all() and (g['pipeline_stage']=='bold').all()
         )
         complete_list = sorted(complete[complete].index.tolist())
@@ -1006,6 +1013,77 @@ def build_bold_flags(d):
     return card("7. BOLD Quality Flags", content, "s7")
 
 
+def build_bold_concordance(d):
+    """Section 8 — BOLD sequence concordance (FASTA upload vs current BOLD)."""
+    df = d.get('bold_concordance', pd.DataFrame())
+    if df.empty:
+        return card("8. BOLD Sequence Concordance",
+                    alert("No concordance data found. Run bold_sequence_concordance.py --exclude-bge", "warn"),
+                    "s8")
+
+    # Load summary txt for total counts including IDENTICAL
+    # We only have non-identical rows in the CSV — reconstruct totals from summary if available
+    total_on_bold = len(df)  # minimum — excludes identical
+
+    vc = df['status'].value_counts() if 'status' in df.columns else pd.Series()
+
+    n_different    = int(vc.get('DIFFERENT', 0))
+    n_trim5        = int(vc.get('TRIM_5PRIME', 0))
+    n_trim3        = int(vc.get('TRIM_3PRIME', 0))
+    n_near         = int(vc.get('NEAR_IDENTICAL', 0))
+    n_close        = int(vc.get('CLOSE', 0))
+    n_bold_only    = int(vc.get('BOLD_ONLY', 0))
+
+    stats = stat_grid([
+        ("Non-identical records", fmt(total_on_bold)),
+        ("Genuinely different ⚠", badge(fmt(n_different), "red")),
+        ("Trimming only (5' end)", fmt(n_trim5)),
+        ("Trimming only (3' end)", fmt(n_trim3)),
+        ("Near-identical (>99%)", fmt(n_near)),
+        ("BOLD_ONLY (no FASTA)", fmt(n_bold_only)),
+    ])
+
+    note = alert(
+        "ℹ The February 2026 QC rerun may have selected a different consensus sequence "
+        "for some specimens compared to what was originally uploaded to BOLD. "
+        "<strong>TRIM_5PRIME/TRIM_3PRIME</strong> = length difference only, sequences are otherwise identical. "
+        "<strong>DIFFERENT</strong> = genuinely different sequence — the QC rerun chose a different consensus.",
+        "info"
+    )
+
+    status_rows = [
+        [badge("IDENTICAL","green"), "—", "100% match — sequence unchanged", "No action"],
+        [badge("TRIM_5PRIME","blue"), fmt(n_trim5), "Extra bases at 5' end of FASTA only — right-aligned sequences are identical", "No action — trimming only"],
+        [badge("TRIM_3PRIME","blue"), fmt(n_trim3), "Extra bases at 3' end of FASTA only — left-aligned sequences are identical", "No action — trimming only"],
+        [badge("NEAR_IDENTICAL","amber"), fmt(n_near), ">99% overlap — minor formatting difference", "Review"],
+        [badge("CLOSE","amber"), fmt(n_close), "95-99% identity", "Review"],
+        [badge("DIFFERENT","red"), fmt(n_different), "Genuinely different sequence from QC rerun", badge("Investigate","red")],
+        [badge("BOLD_ONLY","amber"), fmt(n_bold_only), "On BOLD but not in any batch FASTA", "Investigate — pre-pipeline upload"],
+    ]
+    status_tbl = table(["Status","Count","Meaning","Action"], status_rows)
+
+    # DIFFERENT by batch
+    if n_different > 0 and 'best_batch' in df.columns:
+        diff = df[df['status']=='DIFFERENT']
+        by_batch = diff['best_batch'].value_counts().head(10)
+        batch_rows = [[b, fmt(int(n))] for b,n in by_batch.items()]
+        batch_tbl = "<h3>DIFFERENT specimens by batch</h3>" +                     table(["Batch","Specimens"], batch_rows)
+    else:
+        batch_tbl = ""
+
+    # DIFFERENT by partner
+    if n_different > 0 and 'partner' in df.columns:
+        diff = df[df['status']=='DIFFERENT']
+        by_partner = diff['partner'].value_counts().head(15)
+        partner_rows = [[p, fmt(int(n))] for p,n in by_partner.items()]
+        partner_tbl = "<h3>DIFFERENT specimens by partner</h3>" +                       table(["Partner","Specimens"], partner_rows)
+    else:
+        partner_tbl = ""
+
+    content = note + stats + "<h3>Status breakdown</h3>" + status_tbl +               "<div class='two-col'>" + batch_tbl + partner_tbl + "</div>"
+    return card("8. BOLD Sequence Concordance (QC FASTA vs BOLD)", content, "s8")
+
+
 def build_actions(d):
     df         = d['plate_status']
     bold_comp  = d['bold_flagged_comp']
@@ -1082,7 +1160,7 @@ def build_actions(d):
         "Sequences on BOLD but not in QC FASTA — possibly pre-dating current pipeline.",
         "bold_flagged_comparison_YYYYMMDD.csv", "low")
 
-    return card("8. Actions Required", content, "s8")
+    return card("9. Actions Required", content, "s9")
 
 
 # ── Assemble HTML ─────────────────────────────────────────────────────────────
@@ -1100,7 +1178,7 @@ def build_html(sections_html, meta, exclude_bge):
         ("s5","5. Repeat Sequencing"),
         ("s6","6. Missing Specimens"),
         ("s7","7. BOLD Quality Flags"),
-        ("s8","8. Actions Required"),
+        ("s9","9. Actions Required"),
     ]
     nav_html = '<span class="nav-section">Sections</span>'
     nav_html += "".join(f'<a href="#{id_}">{label}</a>' for id_,label in nav_items)
@@ -1174,6 +1252,7 @@ def main():
         build_repeat(d),
         build_missing_specimens(d),
         build_bold_flags(d),
+        build_bold_concordance(d),
         build_actions(d),
     ]
 

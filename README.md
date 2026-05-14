@@ -39,11 +39,7 @@ All input data is read directly from lustre — nothing is copied or modified.
 All outputs are written to:
 `/lustre/scratch126/tol/teams/lawniczak/users/lp20/bioscan_plate_checker_results/`
 
-Each script run creates a timestamped subdirectory `YYYYMMDD_HHMMSS/` inside the results directory. Files within that folder carry the same timestamp in their name. This means repeated runs never overwrite each other and every set of outputs is fully traceable to a specific run.
-
-Two cache files remain in the root (they are shared inputs between scripts, not run-specific outputs):
-- `portal_plates_from_dump.csv` — built by `read_portal_dump.py`, read by `plate_status_report.py` and `plate_summary_all.py`
-- `bold_workbench_combined.csv` — built by `bold_workbench_analysis.py` on first run
+Files are dated `YYYYMMDD`.
 
 ---
 
@@ -61,7 +57,7 @@ Two cache files remain in the root (they are shared inputs between scripts, not 
 
 | File | Type | Level | Description |
 |---|---|---|---|
-| `pipeline_report_YYYYMMDD_HHMMSS.txt` | Text | Summary | Human-readable report of the full pipeline status. Shows overall pass-through rates at each stage, per-partner breakdown, plates flagged as old submissions not yet sequenced (configurable threshold, default 90 days), and BOLD upload gaps by partner. Best file to share with project managers or partners. |
+| `pipeline_report_YYYYMMDD.txt` | Text | Summary | Human-readable report of the full pipeline status. Shows overall pass-through rates at each stage, per-partner breakdown, plates flagged as old submissions not yet sequenced (configurable threshold, default 180 days), and BOLD upload gaps by partner. Best file to share with project managers or partners. |
 
 ---
 
@@ -106,41 +102,8 @@ Two cache files remain in the root (they are shared inputs between scripts, not 
 
 | File | Type | Level | Description |
 |---|---|---|---|
-| `missing_specimens_categorised_YYYYMMDD_HHMMSS.csv` | CSV | Specimen | One row per specimen absent from the consensusseq table. Categorised as Cat1 (zero reads), Cat2_low (few reads, no consensus), or Cat2_high (reads present but no consensus — investigate). |
-| `missing_specimens_batch_summary_YYYYMMDD_HHMMSS.csv` | CSV | Batch | Batch-level counts of expected vs present specimens in each category. Use to identify batches with systematic assembly failures. |
-
----
-
-### From `qc_bold_mismatch.py` — data integrity check: QC-FAILED specimens in BOLD
-
-Flags specimens that have QC result = FAILED (`category_decision = NO`) but still have a sequence on BOLD. This should never happen — only QC-passed specimens should be transferred. Any match indicates a data integrity issue requiring investigation.
-
-BGE partner plates (BGEP, BGEG, BGKU, BGPT) are excluded from this check by default.
-
-| File | Type | Level | Description |
-|---|---|---|---|
-| `qc_bold_mismatch_ALL_YYYYMMDD_HHMMSS.csv` | CSV | Specimen | One row per mismatch. Columns: `specimen_id`, `plate_id`, `partner`, `qc_batch`, `qc_decision_raw`, `bold_nuc`, `bold_sequence_upload_date`, `bold_bin_uri`, `sts_submit_date`. |
-| `qc_bold_mismatch_ALL_YYYYMMDD_HHMMSS.txt` | Text | Summary | Human-readable report: total mismatches, breakdown by partner and QC batch, detail table. |
-
----
-
-### From `generate_html_report.py` — browser-based pipeline report
-
-Aggregates the most recent outputs from all other scripts into a single self-contained HTML file. Opens in any browser — no server required.
-
-| File | Type | Level | Description |
-|---|---|---|---|
-| `bioscan_report_YYYYMMDD.html` | HTML | Summary | Interactive report with sidebar navigation. Eight sections covering pipeline overview, missing plates, BOLD upload gaps, QC pass rates, repeat sequencing, assembly failures, BOLD quality flags, and a prioritised action list. Written to the `RESULTS_DIR` root (not a timestamped subfolder) so it is easy to find after each run. |
-
----
-
-### From `generate_summary_report.py` — Markdown pipeline report
-
-Same eight sections as the HTML report but in plain Markdown. Renders well on GitHub and in any Markdown viewer.
-
-| File | Type | Level | Description |
-|---|---|---|---|
-| `bioscan_summary_report_YYYYMMDD.md` | Markdown | Summary | Full pipeline status report with tables and actionable recommendations. Written to the `RESULTS_DIR` root (not a timestamped subfolder). Good for sharing in a repository or as a standalone reference document. |
+| `missing_specimens_categorised_YYYYMMDD.csv` | CSV | Specimen | One row per specimen absent from the consensusseq table. Categorised as Cat1 (zero reads), Cat2_low (few reads, no consensus), or Cat2_high (reads present but no consensus — investigate). |
+| `missing_specimens_batch_summary_YYYYMMDD.csv` | CSV | Batch | Batch-level counts of expected vs present specimens in each category. Use to identify batches with systematic assembly failures. |
 
 ---
 
@@ -155,6 +118,31 @@ Same eight sections as the HTML report but in plain Markdown. Renders well on Gi
 | `bold_needs_resubmission_YYYYMMDD.csv` | CSV | Specimen | **Key actionable output.** Specimens with no BIN, a quality flag, and a DIFFERENT (better) sequence in QC. These should be resubmitted to BOLD to obtain a BIN. Includes partner, flag type, and upload date. |
 | `bold_flagged_no_alternative_YYYYMMDD.csv` | CSV | Specimen | Flagged specimens where the QC sequence is IDENTICAL to BOLD — flag is genuine, no better sequence available. Requires manual expert assessment. |
 | `bold_full_concordance_YYYYMMDD.csv` | CSV | Specimen | **Ad hoc only** (`--full-concordance`). Every sequence on BOLD compared against QC FASTA. Confirms 100% concordance or flags drift. |
+
+---
+
+### From `bold_sequence_concordance.py` — upload sequence vs current BOLD comparison
+
+| File | Type | Level | Description |
+|---|---|---|---|
+| `bold_sequence_concordance_ALL_YYYYMMDD.csv` | CSV | Specimen | Non-identical specimens only. One row per specimen on BOLD where the sequence differs from the `BOLD_filtered_sequences_batchN.fasta` upload source. Columns include: specimen_id, plate_id, partner, bold_upload_date, bold_bin_uri, bold_seq_length, best_pct_identity, best_batch, fasta_seq_length, length_diff, overlap_pct_left, overlap_pct_right, status. |
+| `bold_sequence_concordance_ALL_YYYYMMDD_summary.txt` | Text | Summary | Full status counts including IDENTICAL — headline numbers for reporting. |
+
+**Status values:**
+
+| Status | Meaning | Action |
+|---|---|---|
+| `IDENTICAL` | 100% match — sequence unchanged (excluded from CSV) | None |
+| `TRIM_5PRIME` | Extra bases at 5' end of FASTA only — right-aligned identical | None — trimming only |
+| `TRIM_3PRIME` | Extra bases at 3' end of FASTA only — left-aligned identical | None — trimming only |
+| `NEAR_IDENTICAL` | >99% overlap in at least one direction | Review |
+| `CLOSE` | 95–99% identity | Review |
+| `DIFFERENT` | Genuinely different sequence — QC rerun selected a different consensus | Investigate |
+| `BOLD_ONLY` | On BOLD but not in any batch FASTA — pre-pipeline upload | Investigate |
+
+**Note:** The February 2026 QC rerun may have selected a different consensus for some specimens vs what was originally uploaded to BOLD. `DIFFERENT` status is not necessarily an error — it reflects that the pipeline has since produced a different sequence call. Concentrated in batch20 where consensus calling differed systematically from the original upload.
+
+**`overlap_pct_left` / `overlap_pct_right`:** % identity when sequences are aligned from left (5') or right (3') end — directly answers "if you remove the length difference, is the sequence identical?"
 
 ---
 
@@ -220,7 +208,7 @@ python3 read_portal_dump.py
 # 2. Master plate status table: portal → mBRAVE → QC → BOLD
 python3 plate_status_report.py --partner ALL
 
-# 3. Human-readable pipeline report (flags plates not sequenced within 90 days)
+# 3. Human-readable pipeline report
 python3 generate_pipeline_report.py
 
 # 4. Comprehensive plate-level QC summary (best result per specimen, all controls)
@@ -229,29 +217,19 @@ python3 plate_summary_all.py --partner ALL
 # 5. BOLD upload and BIN URI summary
 python3 bold_summary_from_portal.py --partner ALL
 
-# 6. Data integrity check: QC-FAILED specimens present in BOLD
-python3 qc_bold_mismatch.py
-
-# 7. Repeat analysis — plate level
+# 6. Repeat analysis — plate level
 python3 repeat_analysis.py --partner ALL
 
-# 8. Repeat analysis — specimen level with QC decisions per batch
+# 7. Repeat analysis — specimen level with QC decisions per batch
 python3 repeat_analysis_specimens.py --partner ALL
 
-# 9. Missing specimen analysis (~10 mins)
+# 8. Missing specimen analysis (~10 mins)
 python3 missing_specimen_analysis.py --partner ALL
 
-# 10. BOLD workbench analysis (when new workbench files downloaded)
+# 9. BOLD workbench analysis (when new workbench files downloaded)
 python3 bold_workbench_analysis.py --partner ALL --rebuild-cache
-
-# 11. Generate HTML report (browser-based, reads most recent outputs automatically)
-python3 generate_html_report.py
-
-# 12. Generate Markdown summary report (shareable document)
-python3 generate_summary_report.py
+python3 bold_sequence_concordance.py --exclude-bge
 ```
-
-To exclude BGE partner plates (BGEP, BGEG, BGKU, BGPT) from any run, add `--exclude-bge` to steps 1, 2, 4, 5, 6, 11, 12.
 
 ### Quarterly BOLD sanity check
 
@@ -296,12 +274,11 @@ python3 utils.py   # run the batch structure audit
 ---
 
 ### `read_portal_dump.py`
-Reads the portal manifest TSV and builds a plate-level summary CSV (`portal_plates_from_dump.csv`). Run whenever a new dump is available. The output CSV is a shared cache in the root of `RESULTS_DIR` (not in a timestamped subfolder) because it is read by `plate_status_report.py` and `plate_summary_all.py`.
+Reads the portal manifest TSV and builds a plate-level summary CSV. Run whenever a new dump is available.
 
 ```bash
 python3 read_portal_dump.py
 python3 read_portal_dump.py --input /path/to/sts_manifests_20260427.tsv
-python3 read_portal_dump.py --exclude-bge   # omit BGEP/BGEG/BGKU/BGPT from the cache
 ```
 
 ---
@@ -319,11 +296,11 @@ python3 plate_status_report.py --partner ALL --missing-only
 ---
 
 ### `generate_pipeline_report.py`
-Human-readable pipeline report. Flags plates submitted more than N days ago not yet sequenced (default: 90 days).
+Human-readable pipeline report. Flags plates submitted more than N days ago not yet sequenced.
 
 ```bash
 python3 generate_pipeline_report.py
-python3 generate_pipeline_report.py --old-threshold-days 90
+python3 generate_pipeline_report.py --old-threshold-days 180
 ```
 
 ---
@@ -334,7 +311,6 @@ BOLD upload and BIN URI summaries from the portal dump. No API or R required.
 ```bash
 python3 bold_summary_from_portal.py --partner ALL
 python3 bold_summary_from_portal.py --partner FACE
-python3 bold_summary_from_portal.py --exclude-bge   # omit BGEP/BGEG/BGKU/BGPT plates
 ```
 
 ---
@@ -359,7 +335,6 @@ Produces two output files: PASS/ON_HOLD/FAIL summary, and categories 1–12 brea
 python3 plate_summary_all.py --partner ALL
 python3 plate_summary_all.py --partner BGEP
 python3 plate_summary_all.py --verbose
-python3 plate_summary_all.py --exclude-bge   # omit BGEP/BGEG/BGKU/BGPT plates
 ```
 
 ### `repeat_analysis.py`
@@ -403,13 +378,15 @@ python3 missing_specimen_analysis.py --low-read-threshold 50
 
 ---
 
-### `qc_bold_mismatch.py`
-Data integrity check. Cross-references QC-FAILED specimens against BOLD upload records in the portal dump. Any specimen that failed QC but has a sequence on BOLD is a data integrity problem requiring investigation.
+### `bold_sequence_concordance.py`
+Compares sequences currently on BOLD (from portal dump `bold_nuc` column) against the `BOLD_filtered_sequences_batchN.fasta` files — the actual sequences uploaded to BOLD. Identifies specimens where the sequence on BOLD differs from the QC pipeline output, distinguishing genuine sequence differences from trimming artefacts.
+
+For specimens appearing in multiple batches, all batches are checked and the output records which batch(es) have an identical match.
 
 ```bash
-python3 qc_bold_mismatch.py                  # all non-BGE partners
-python3 qc_bold_mismatch.py --partner FACE
-python3 qc_bold_mismatch.py --verbose        # per-batch logging
+python3 bold_sequence_concordance.py --partner CAMP      # test run
+python3 bold_sequence_concordance.py --exclude-bge       # full run
+python3 bold_sequence_concordance.py --verbose           # per-batch progress
 ```
 
 ---
@@ -441,32 +418,6 @@ python3 bold_workbench_analysis.py --partner ALL          # routine
 python3 bold_workbench_analysis.py --full-concordance     # ad hoc
 python3 bold_workbench_analysis.py --rebuild-cache        # after new files
 python3 bold_workbench_analysis.py --skip-sequence-comparison
-```
-
----
-
-### `generate_html_report.py`
-Self-contained HTML report aggregating all pipeline outputs. Reads the most recently modified file for each expected pattern — searching both the `RESULTS_DIR` root and all timestamped subdirectories — so it always reflects the latest run without any manual file selection.
-
-Output is written to `RESULTS_DIR/bioscan_report_YYYYMMDD.html` (root, not a timestamped subfolder).
-
-```bash
-python3 generate_html_report.py
-python3 generate_html_report.py --exclude-bge         # exclude BGEP/BGEG/BGKU/BGPT rows
-python3 generate_html_report.py --output /path/to/report.html
-```
-
----
-
-### `generate_summary_report.py`
-Markdown pipeline report with the same eight sections as the HTML version. Useful for sharing in a repository or with colleagues who prefer plain text.
-
-Output is written to `RESULTS_DIR/bioscan_summary_report_YYYYMMDD.md` (root, not a timestamped subfolder).
-
-```bash
-python3 generate_summary_report.py
-python3 generate_summary_report.py --exclude-bge      # exclude BGEP/BGEG/BGKU/BGPT rows
-python3 generate_summary_report.py --output /path/to/report.md
 ```
 
 ---
