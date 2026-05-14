@@ -239,6 +239,19 @@ def run_comparison(portal_df, fasta_files, verbose=False):
                 identities[batch]    = 0.0
                 fasta_lengths[batch] = None
 
+        # For the best batch, compute overlap identities:
+        # left-aligned (trim 3' end of longer) and right-aligned (trim 5' end of longer)
+        # These directly answer: "if you remove the length difference, is the sequence identical?"
+        best_fasta_seq = clean_seq(batch_data.get(best_batch, '')) if best_batch else None
+        if bold_seq and best_fasta_seq:
+            n = min(len(bold_seq), len(best_fasta_seq))
+            overlap_left  = round(100 * sum(a==b for a,b in zip(
+                bold_seq[:n], best_fasta_seq[:n])) / n, 4) if n else None
+            overlap_right = round(100 * sum(a==b for a,b in zip(
+                bold_seq[-n:], best_fasta_seq[-n:])) / n, 4) if n else None
+        else:
+            overlap_left = overlap_right = None
+
         identical_batches = [b for b, p in identities.items() if p == 100.0]
         best_batch  = max(identities, key=identities.get) if identities else ''
         best_pct    = identities[best_batch] if best_batch else None
@@ -271,8 +284,10 @@ def run_comparison(portal_df, fasta_files, verbose=False):
             'best_batch':         best_batch,
             'fasta_seq_length':   best_flen,
             'length_diff':        lendiff,
-            'all_pct_identities': json.dumps(identities),
-            'status':             status,
+            'all_pct_identities':  json.dumps(identities),
+            'overlap_pct_left':    overlap_left,   # identity if left-aligned (trim 3' end)
+            'overlap_pct_right':   overlap_right,  # identity if right-aligned (trim 5' end)
+            'status':              status,
         })
 
     return pd.DataFrame(results)
