@@ -22,7 +22,7 @@ import pandas as pd
 import glob
 
 import config
-from utils import resolve_batches, batch_sort_key, safe_read_csv, matches_partner, extract_plate_from_pid
+from utils import resolve_batches, batch_sort_key, safe_read_csv, matches_partner, extract_plate_from_pid, resolve_run_dir
 
 
 _PLATE_COL    = 'Sample.Plate.ID'
@@ -195,6 +195,8 @@ def main():
     parser.add_argument('--partner', default='ALL')
     parser.add_argument('--min-sequencings', type=int, default=2)
     parser.add_argument('--verbose', action='store_true')
+    parser.add_argument('--run-dir', default=None,
+        help='Output directory (overrides BIOSCAN_RUN_DIR env var and auto-generate)')
     args = parser.parse_args()
 
     df = run_repeat_analysis(partner=args.partner,
@@ -202,9 +204,8 @@ def main():
                              verbose=args.verbose)
     print_repeat_summary(df)
 
+    run_dir = resolve_run_dir(args.run_dir)
     run_ts  = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-    run_dir = os.path.join(config.RESULTS_DIR, run_ts)
-    os.makedirs(run_dir, exist_ok=True)
 
     csv_path  = os.path.join(run_dir, f'repeat_analysis_{run_ts}.csv')
     xlsx_path = os.path.join(run_dir, f'repeat_analysis_{run_ts}.xlsx')

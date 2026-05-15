@@ -31,7 +31,7 @@ import pandas as pd
 from collections import defaultdict
 
 import config
-from utils import is_bge_plate
+from utils import is_bge_plate, resolve_run_dir
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -758,18 +758,21 @@ def main():
     parser.add_argument('--exclude-bge', action='store_true',
         help='Exclude BGE partners (BGEP, BGEG, BGKU, BGPT) from report')
     parser.add_argument('--output', default=None,
-        help='Output markdown path (default: RESULTS_DIR/bioscan_summary_report_YYYYMMDD.md)')
+        help='Output markdown path (default: run_dir/bioscan_summary_report_YYYYMMDD_HHMMSS.md)')
+    parser.add_argument('--run-dir', default=None,
+        help='Output directory (overrides BIOSCAN_RUN_DIR env var and auto-generate)')
     args = parser.parse_args()
 
-    today = datetime.datetime.now().strftime('%Y%m%d')
+    run_dir = resolve_run_dir(args.run_dir)
+    run_ts  = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
     results = config.RESULTS_DIR
 
     if args.output is None:
-        os.makedirs(results, exist_ok=True)
-        args.output = os.path.join(results, f'bioscan_summary_report_{today}.md')
+        args.output = os.path.join(run_dir, f'bioscan_summary_report_{run_ts}.md')
 
     print(f"Generating BIOSCAN summary report...")
     print(f"  Results dir: {results}")
+    print(f"  Output dir:  {run_dir}")
     print(f"  Exclude BGE: {args.exclude_bge}")
     print()
 

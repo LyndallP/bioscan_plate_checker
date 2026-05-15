@@ -234,6 +234,29 @@ def is_bge_plate(plate_id):
     return False
 
 
+# ── Run directory resolution ──────────────────────────────────────────────────
+
+def resolve_run_dir(explicit_path=None):
+    """Return the output directory for this run, creating it if needed.
+
+    Priority:
+      1. explicit_path  — value of --run-dir CLI argument
+      2. BIOSCAN_RUN_DIR env var  — set via: eval $(python3 new_run.py)
+      3. Auto-generate a new RESULTS_DIR/YYYYMMDD_HHMMSS/ folder
+    """
+    import datetime
+    import config as _config
+
+    path = explicit_path or os.environ.get('BIOSCAN_RUN_DIR')
+    if path:
+        os.makedirs(path, exist_ok=True)
+        return path
+    run_ts = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+    run_dir = os.path.join(_config.RESULTS_DIR, run_ts)
+    os.makedirs(run_dir, exist_ok=True)
+    return run_dir
+
+
 # ── Safe file reading ─────────────────────────────────────────────────────────
 
 def safe_read_csv(filepath, **kwargs):

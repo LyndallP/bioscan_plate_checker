@@ -34,7 +34,7 @@ import pandas as pd
 from collections import defaultdict
 
 import config
-from utils import is_bge_plate
+from utils import is_bge_plate, resolve_run_dir
 
 QC_DIR         = '/lustre/scratch126/tol/teams/lawniczak/projects/bioscan/bioscan_qc/qc_reports_rerun_Feb2026'
 _FASTA_PATTERN = 'BOLD_filtered_sequences_batch*.fasta'
@@ -350,10 +350,12 @@ def main():
     parser.add_argument('--output', default=None,
         help='Output CSV path')
     parser.add_argument('--verbose', action='store_true')
+    parser.add_argument('--run-dir', default=None,
+        help='Output directory (overrides BIOSCAN_RUN_DIR env var and auto-generate)')
     args = parser.parse_args()
 
-    today = datetime.datetime.now().strftime('%Y%m%d')
-    os.makedirs(config.RESULTS_DIR, exist_ok=True)
+    run_dir = resolve_run_dir(args.run_dir)
+    run_ts  = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
 
     dump_path = args.input or find_latest_dump(config.RESULTS_DIR)
     if not dump_path or not os.path.exists(dump_path):
@@ -362,8 +364,7 @@ def main():
 
     suffix = f"_{args.partner}" if args.partner else "_ALL"
     if args.output is None:
-        args.output = os.path.join(
-            config.RESULTS_DIR, f'bold_sequence_concordance{suffix}_{today}.csv')
+        args.output = os.path.join(run_dir, f'bold_sequence_concordance{suffix}_{run_ts}.csv')
 
     portal_df = load_portal_sequences(dump_path,
                                       partner_filter=args.partner,

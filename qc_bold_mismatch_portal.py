@@ -25,7 +25,7 @@ import os
 import pandas as pd
 
 import config
-from utils import is_bge_plate
+from utils import is_bge_plate, resolve_run_dir
 
 # Portal column names
 _QC_RESULT_COL   = 'bioscan_qc_sanger_qc_result'
@@ -85,11 +85,13 @@ def main():
     parser.add_argument('--exclude-bge', action='store_true',
         help='Exclude BGE partners (BGEP, BGEG, BGKU, BGPT)')
     parser.add_argument('--output', default=None,
-        help='Output CSV path (default: RESULTS_DIR/qc_bold_mismatch_YYYYMMDD.csv)')
+        help='Output CSV path (default: run_dir/qc_bold_mismatch_YYYYMMDD_HHMMSS.csv)')
+    parser.add_argument('--run-dir', default=None,
+        help='Output directory (overrides BIOSCAN_RUN_DIR env var and auto-generate)')
     args = parser.parse_args()
 
-    today = datetime.datetime.now().strftime('%Y%m%d')
-    os.makedirs(config.RESULTS_DIR, exist_ok=True)
+    run_dir = resolve_run_dir(args.run_dir)
+    run_ts  = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
 
     # Find dump
     dump_path = args.input or find_latest_dump(config.RESULTS_DIR)
@@ -218,8 +220,7 @@ def main():
 
     # Save output
     if args.output is None:
-        args.output = os.path.join(
-            config.RESULTS_DIR, f'qc_bold_mismatch_{today}.csv')
+        args.output = os.path.join(run_dir, f'qc_bold_mismatch_{run_ts}.csv')
 
     # Save full mismatch table
     out_cols = [c for c in [_SPECIMEN_COL, 'plate_id', 'partner',

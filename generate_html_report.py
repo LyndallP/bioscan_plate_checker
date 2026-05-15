@@ -18,7 +18,7 @@ import re
 import pandas as pd
 
 import config
-from utils import is_bge_plate
+from utils import is_bge_plate, resolve_run_dir
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -1226,18 +1226,21 @@ def main():
     parser.add_argument('--exclude-bge', action='store_true',
         help='Exclude BGE partners (BGEP, BGEG, BGKU, BGPT)')
     parser.add_argument('--output', default=None,
-        help='Output HTML path (default: RESULTS_DIR/bioscan_report_YYYYMMDD.html)')
+        help='Output HTML path (default: run_dir/bioscan_report_YYYYMMDD_HHMMSS.html)')
+    parser.add_argument('--run-dir', default=None,
+        help='Output directory (overrides BIOSCAN_RUN_DIR env var and auto-generate)')
     args = parser.parse_args()
 
-    today = datetime.datetime.now().strftime('%Y%m%d')
+    run_dir = resolve_run_dir(args.run_dir)
+    run_ts  = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
     results = config.RESULTS_DIR
-    os.makedirs(results, exist_ok=True)
 
     if args.output is None:
-        args.output = os.path.join(results, f'bioscan_report_{today}.html')
+        args.output = os.path.join(run_dir, f'bioscan_report_{run_ts}.html')
 
     print(f"Generating BIOSCAN HTML report...")
     print(f"  Results dir:  {results}")
+    print(f"  Output dir:   {run_dir}")
     print(f"  Exclude BGE:  {args.exclude_bge}")
     print(f"  Output:       {args.output}")
     print()

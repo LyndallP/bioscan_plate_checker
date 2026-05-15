@@ -23,7 +23,7 @@ import pandas as pd
 import config
 from mbrave_checker import build_mbrave_plate_index, summarise_mbrave
 from qc_checker import build_qc_plate_index, summarise_qc
-from utils import matches_partner
+from utils import matches_partner, resolve_run_dir
 
 
 # ── Control filtering ─────────────────────────────────────────────────────────
@@ -244,6 +244,8 @@ def main():
     parser.add_argument('--missing-only', action='store_true',
         help='Print only plates with missing_at set')
     parser.add_argument('--verbose', action='store_true')
+    parser.add_argument('--run-dir', default=None,
+        help='Output directory (overrides BIOSCAN_RUN_DIR env var and auto-generate)')
     args = parser.parse_args()
 
     df, mbrave_skipped, cross_issues, batches_missing_qc = build_master_table(
@@ -266,8 +268,7 @@ def main():
     if batches_missing_qc:
         print(f"Batches with no filtered_metadata: {batches_missing_qc}")
 
-    run_ts  = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-    run_dir = os.path.join(config.RESULTS_DIR, run_ts)
+    run_dir = resolve_run_dir(args.run_dir)
     save_outputs(df, args.partner, results_dir=run_dir)
 
 

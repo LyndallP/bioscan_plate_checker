@@ -22,6 +22,7 @@ import glob
 import pandas as pd
 
 import config
+from utils import resolve_run_dir
 
 
 def find_latest_status_csv(results_dir):
@@ -196,7 +197,9 @@ def main():
     parser.add_argument('--old-threshold-days', type=int, default=90,
         help='Days after which an unsequenced submission is flagged (default: 90)')
     parser.add_argument('--output', default=None,
-        help='Output report path (default: RESULTS_DIR/pipeline_report_YYYYMMDD.txt)')
+        help='Output report path (default: run_dir/pipeline_report_YYYYMMDD_HHMMSS.txt)')
+    parser.add_argument('--run-dir', default=None,
+        help='Output directory (overrides BIOSCAN_RUN_DIR env var and auto-generate)')
     args = parser.parse_args()
 
     # Find input
@@ -204,12 +207,9 @@ def main():
         args.input = find_latest_status_csv(config.RESULTS_DIR)
     print(f"Reading: {args.input}")
 
-    # Create timestamped run directory
+    run_dir = resolve_run_dir(args.run_dir)
     run_ts  = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-    run_dir = os.path.join(config.RESULTS_DIR, run_ts)
-    os.makedirs(run_dir, exist_ok=True)
 
-    # Output path
     if args.output is None:
         args.output = os.path.join(run_dir, f'pipeline_report_{run_ts}.txt')
 

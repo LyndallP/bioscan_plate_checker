@@ -40,7 +40,7 @@ from collections import defaultdict
 
 import config
 from utils import (resolve_batches, build_batch_cross_map,
-                   batch_sort_key, matches_partner, safe_read_csv, is_bge_plate)
+                   batch_sort_key, matches_partner, safe_read_csv, is_bge_plate, resolve_run_dir)
 
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -580,11 +580,12 @@ def main():
     parser.add_argument('--verbose', action='store_true')
     parser.add_argument('--exclude-bge', action='store_true',
         help='Exclude BGE partner plates (BGEP, BGEG, BGKU, BGPT) from output')
+    parser.add_argument('--run-dir', default=None,
+        help='Output directory (overrides BIOSCAN_RUN_DIR env var and auto-generate)')
     args = parser.parse_args()
 
+    run_dir = resolve_run_dir(args.run_dir)
     run_ts  = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-    run_dir = os.path.join(config.RESULTS_DIR, run_ts)
-    os.makedirs(run_dir, exist_ok=True)
 
     print("Loading portal plate list...")
     portal_plates = load_portal_plates(exclude_bge=args.exclude_bge)

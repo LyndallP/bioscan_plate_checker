@@ -56,7 +56,7 @@ import pandas as pd
 from collections import defaultdict
 
 import config
-from utils import resolve_batches, matches_partner
+from utils import resolve_batches, matches_partner, resolve_run_dir
 
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -400,11 +400,12 @@ def main():
     parser.add_argument('--rebuild-cache', action='store_true',
         help='Force re-read of annual workbench files')
     parser.add_argument('--verbose', action='store_true')
+    parser.add_argument('--run-dir', default=None,
+        help='Output directory (overrides BIOSCAN_RUN_DIR env var and auto-generate)')
     args = parser.parse_args()
 
+    run_dir = resolve_run_dir(args.run_dir)
     run_ts  = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-    run_dir = os.path.join(config.RESULTS_DIR, run_ts)
-    os.makedirs(run_dir, exist_ok=True)
 
     # Load workbench
     print("=" * 60)

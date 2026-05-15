@@ -29,7 +29,7 @@ import re
 import pandas as pd
 
 import config
-from utils import extract_plate_from_pid, matches_partner, is_bge_plate
+from utils import extract_plate_from_pid, matches_partner, is_bge_plate, resolve_run_dir
 
 
 # ── Column names in portal dump ───────────────────────────────────────────────
@@ -231,11 +231,12 @@ def main():
     parser.add_argument('--partner', default='ALL')
     parser.add_argument('--exclude-bge', action='store_true',
         help='Exclude BGE partner plates (BGEP, BGEG, BGKU, BGPT) from output')
+    parser.add_argument('--run-dir', default=None,
+        help='Output directory (overrides BIOSCAN_RUN_DIR env var and auto-generate)')
     args = parser.parse_args()
 
+    run_dir = resolve_run_dir(args.run_dir)
     run_ts  = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-    run_dir = os.path.join(config.RESULTS_DIR, run_ts)
-    os.makedirs(run_dir, exist_ok=True)
 
     df       = load_portal_dump(args.input, partner=args.partner,
                                 exclude_bge=args.exclude_bge)

@@ -36,7 +36,7 @@ import pandas as pd
 from collections import defaultdict
 
 import config
-from utils import resolve_batches, safe_read_csv, batch_sort_key, matches_partner
+from utils import resolve_batches, safe_read_csv, batch_sort_key, matches_partner, resolve_run_dir
 
 
 UMI_SAMPLE_PATTERN   = "umi.*_sample_stats.txt"
@@ -225,6 +225,8 @@ def main():
     parser.add_argument('--low-read-threshold', type=int, default=50,
         help='Read count below which Cat2 is flagged as "low" (default: 50)')
     parser.add_argument('--verbose', action='store_true')
+    parser.add_argument('--run-dir', default=None,
+        help='Output directory (overrides BIOSCAN_RUN_DIR env var and auto-generate)')
     args = parser.parse_args()
 
     print("Scanning UMI stats and consensusseq files...")
@@ -235,9 +237,8 @@ def main():
         verbose=args.verbose,
     )
 
+    run_dir = resolve_run_dir(args.run_dir)
     run_ts  = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-    run_dir = os.path.join(config.RESULTS_DIR, run_ts)
-    os.makedirs(run_dir, exist_ok=True)
 
     # Summary
     print("\nBATCH SUMMARY")

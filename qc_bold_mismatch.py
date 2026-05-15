@@ -40,7 +40,7 @@ import re
 import pandas as pd
 
 import config
-from utils import extract_plate_from_pid, is_bge_plate, safe_read_csv, batch_sort_key
+from utils import extract_plate_from_pid, is_bge_plate, safe_read_csv, batch_sort_key, resolve_run_dir
 
 
 # ── Column names ──────────────────────────────────────────────────────────────
@@ -340,11 +340,12 @@ def main():
     parser.add_argument('--partner', default='ALL',
         help='4-letter partner code to filter (default: ALL)')
     parser.add_argument('--verbose', action='store_true')
+    parser.add_argument('--run-dir', default=None,
+        help='Output directory (overrides BIOSCAN_RUN_DIR env var and auto-generate)')
     args = parser.parse_args()
 
+    run_dir = resolve_run_dir(args.run_dir)
     run_ts  = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-    run_dir = os.path.join(config.RESULTS_DIR, run_ts)
-    os.makedirs(run_dir, exist_ok=True)
 
     # ── 1. Load QC FAILED specimens ───────────────────────────────────────────
     print("Loading QC-FAILED specimens...")
