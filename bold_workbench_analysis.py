@@ -538,7 +538,7 @@ def main():
     print(f"  {plate_path}  <- plate-level flag counts")
     if flagged_comp is not None:
         print(f"  bold_needs_resubmission_{run_ts}.csv   <- BOLD records to update (DIFFERENT + no BIN)")
-        print(f"  bold_flagged_no_alternative_{today}.csv <- genuine flags, manual review needed (IDENTICAL)")
+        print(f"  bold_flagged_no_alternative_{run_ts}.csv <- genuine flags, manual review needed (IDENTICAL)")
 
 
 if __name__ == '__main__':
