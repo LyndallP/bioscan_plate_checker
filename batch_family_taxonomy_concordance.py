@@ -181,11 +181,18 @@ def compare_taxonomy(tax_dict_a, tax_dict_b):
 
     Rules:
     - If both have a value and they differ -> CONFLICT
-    - If one is None and other has a value -> PARTIAL (not a conflict if
-      all filled levels agree)
+      Exception: if species differ but BIN is the same -> BOLD_NAME_AMBIGUITY
+      (multiple species names assigned to one BIN in BOLD database — not a
+      real biological conflict between sequencing runs)
+    - If one is None and other has a value -> PARTIAL
     - If both None -> BOTH_NULL
     - If both same -> IDENTICAL
     """
+    # Check BIN first — used to reclassify species conflicts
+    bin_a = tax_dict_a.get('otu_primary')
+    bin_b = tax_dict_b.get('otu_primary')
+    same_bin = (bin_a is not None and bin_b is not None and bin_a == bin_b)
+
     level_results = {}
     for level in TAX_LEVELS:
         val_a = tax_dict_a.get(level)
@@ -200,7 +207,13 @@ def compare_taxonomy(tax_dict_a, tax_dict_b):
         elif val_a == val_b:
             level_results[level] = 'IDENTICAL'
         else:
-            level_results[level] = 'CONFLICT'
+            # Values differ — check if this is a BOLD name ambiguity
+            if same_bin and level in ('s_primary', 'g_primary'):
+                # Same BIN, different species/genus name — BOLD database has
+                # multiple names for this BIN, not a real biological conflict
+                level_results[level] = 'BOLD_NAME_AMBIGUITY'
+            else:
+                level_results[level] = 'CONFLICT'
 
     return level_results
 
@@ -338,6 +351,7 @@ def analyse_family(family_name, members, mbrave_dir, verbose=False):
         stats['n_comparisons']   = len(comp_df)
         stats['n_identical']     = int((comp_df['conflict_type'] == 'IDENTICAL').sum())
         stats['n_partial']       = int((comp_df['conflict_type'] == 'PARTIAL').sum())
+        stats['n_ambiguity']     = int((comp_df['conflict_type'] == 'BOLD_NAME_AMBIGUITY').sum())
         stats['n_conflict']      = int((comp_df['conflict_type'] == 'CONFLICT').sum())
         stats['n_split_anomaly'] = int(comp_df['split_anomaly'].sum())
         if stats['n_conflict'] > 0:
@@ -366,7 +380,9 @@ def print_summary(all_comparison_rows, all_stats):
     print(f"Total pairwise comparisons: {total_comp:,}")
     print()
     print(f"  IDENTICAL  (all levels match):        {total_id:,} ({100*total_id/max(total_comp,1):.1f}%)")
+    total_amb = sum(s.get('n_ambiguity', 0) for s in all_stats.values())
     print(f"  PARTIAL    (one member has more info): {total_partial:,} ({100*total_partial/max(total_comp,1):.1f}%)")
+    print(f"  BOLD_NAME_AMBIGUITY (same BIN, diff name): {total_amb:,} ({100*total_amb/max(total_comp,1):.1f}%)")
     print(f"  CONFLICT   (genuine disagreement):     {total_conf:,} ({100*total_conf/max(total_comp,1):.1f}%)")
     if total_split:
         print(f"  SPLIT ANOMALY (specimen in >1 split):  {total_split:,} ⚠")
@@ -389,12 +405,13 @@ def print_summary(all_comparison_rows, all_stats):
     # Per-family summary
     print("Per-family breakdown:")
     print(f"  {'Family':20s} {'Specimens':>10} {'Identical':>10} "
-          f"{'Partial':>10} {'Conflict':>10}")
-    print("  " + "-" * 62)
+          f"{'Partial':>10} {'BIN_Ambig':>10} {'Conflict':>10}")
+    print("  " + "-" * 72)
     for fam, stats in sorted(all_stats.items()):
         print(f"  {fam:20s} {stats.get('n_specimens',0):>10,} "
               f"{stats.get('n_identical',0):>10,} "
               f"{stats.get('n_partial',0):>10,} "
+              f"{stats.get('n_ambiguity',0):>10,} "
               f"{stats.get('n_conflict',0):>10,}")
 
 
