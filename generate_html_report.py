@@ -98,6 +98,22 @@ def card(title, content, id_=""):
     return f'<div class="card"{id_attr}><h2>{title}</h2>{content}</div>'
 
 
+def files_box(inputs, outputs):
+    """Render a collapsible 'Files' reference block for a section."""
+    def tags(files, cls):
+        return "".join(f'<code class="file-tag {cls}">{f}</code>' for f in files)
+    inp = tags(inputs, "file-in")
+    out = tags(outputs, "file-out")
+    return (
+        '<details class="files-box">'
+        '<summary>📁 Files used in this section</summary>'
+        '<div class="files-inner">'
+        f'<div class="files-row"><span class="files-label">Inputs:</span>{inp}</div>'
+        f'<div class="files-row"><span class="files-label">Outputs:</span>{out}</div>'
+        '</div></details>'
+    )
+
+
 def alert(text, level="info"):
     return f'<div class="alert alert-{level}">{text}</div>'
 
@@ -400,6 +416,52 @@ tr:hover td { background: var(--bg); }
     background: var(--accent);
 }
 
+.files-box {
+    margin: 14px 0;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg);
+    font-size: 12px;
+}
+.files-box summary {
+    padding: 8px 12px;
+    cursor: pointer;
+    font-weight: 600;
+    color: var(--text-muted);
+    user-select: none;
+    list-style: none;
+}
+.files-box summary::-webkit-details-marker { display: none; }
+.files-box summary::before { content: "▶ "; font-size: 9px; margin-right: 4px; }
+details[open].files-box summary::before { content: "▼ "; }
+.files-box summary:hover { color: var(--text); }
+.files-inner {
+    padding: 6px 12px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.files-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px; }
+.files-label {
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    font-size: 10px;
+    letter-spacing: 0.5px;
+    white-space: nowrap;
+    min-width: 60px;
+}
+.file-tag {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    margin: 1px;
+    font-family: var(--mono);
+    font-size: 11px;
+}
+.file-in  { background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; }
+.file-out { background: #f0fdf4; color: #15803d; border: 1px solid #bbf7d0; }
+
 @media print {
     nav { display: none; }
     .layout { grid-template-columns: 1fr; }
@@ -540,7 +602,12 @@ def build_pipeline_overview(d):
     else:
         complete_html = ""
 
-    content = flow + stats + "<h3>Plates dropped at each stage</h3>" + drop_tbl + complete_html
+    fbox = files_box(
+        inputs=["portal_plates_from_dump.csv", "mBRAVE sequencing outputs", "QC FASTA files", "BOLD plate list"],
+        outputs=["bioscan_plate_status_ALL_YYYYMMDD.csv", "bioscan_plate_status_ALL_YYYYMMDD.xlsx",
+                 "missing_plates_ALL_YYYYMMDD.txt"],
+    )
+    content = fbox + flow + stats + "<h3>Plates dropped at each stage</h3>" + drop_tbl + complete_html
     return card("1. Pipeline Overview", content, "s1")
 
 
@@ -559,12 +626,12 @@ def build_missing_sequencing(d):
     today = pd.Timestamp.now()
     not_seq['days'] = (today - not_seq['submit_date']).dt.days
 
-    old    = not_seq[not_seq['days'] >= 180].sort_values('days', ascending=False)
-    recent = not_seq[not_seq['days'] <  180]
+    old    = not_seq[not_seq['days'] >= 90].sort_values('days', ascending=False)
+    recent = not_seq[not_seq['days'] <  90]
 
     stats = stat_grid([
         ("Total missing", fmt(len(not_seq))),
-        (">180 days — investigate", badge(fmt(len(old)), "red")),
+        (">90 days — investigate", badge(fmt(len(old)), "red")),
         ("Recently submitted", fmt(len(recent))),
     ])
 
@@ -590,7 +657,7 @@ def build_missing_sequencing(d):
     # Partner summary
     by_partner = not_seq.groupby('partner').agg(
         n=('plate_id','count'),
-        old=('days', lambda x: (x>=180).sum())
+        old=('days', lambda x: (x>=90).sum())
     ).reset_index().sort_values('n', ascending=False)
 
     partner_rows = []
@@ -602,10 +669,14 @@ def build_missing_sequencing(d):
 
     partner_tbl = table(["Partner","Plates missing","Status"], partner_rows)
 
-    content = stats
+    fbox = files_box(
+        inputs=["bioscan_plate_status_ALL_YYYYMMDD.csv", "portal_plates_from_dump.csv"],
+        outputs=["missing_plates_ALL_YYYYMMDD.txt"],
+    )
+    content = fbox + stats
     if old_rows:
         content += alert(
-            f"⚠ {len(old)} plates submitted >180 days ago with no sequencing data — investigate immediately.",
+            f"⚠ {len(old)} plates submitted >90 days ago with no sequencing data — investigate immediately.",
             "danger"
         )
         content += "<h3>Old submissions requiring investigation</h3>" + old_tbl
@@ -628,13 +699,13 @@ def build_not_on_bold(d):
     not_bold['days'] = (today - not_bold['submit_date']).dt.days
     not_bold['year'] = not_bold['submit_date'].dt.year
 
-    old    = not_bold[not_bold['days'] >= 180]
+    old    = not_bold[not_bold['days'] >= 90]
     n_2026 = int((not_bold['year'] >= 2026).sum())
     n_2025 = int((not_bold['year'] == 2025).sum())
 
     stats = stat_grid([
         ("Not on BOLD", fmt(len(not_bold))),
-        (">180 days overdue", badge(fmt(len(old)), "red")),
+        (">90 days overdue", badge(fmt(len(old)), "red")),
         ("2026 submissions (recent)", fmt(n_2026)),
         ("2025 submissions", fmt(n_2025)),
     ])
@@ -650,10 +721,14 @@ def build_not_on_bold(d):
 
     partner_tbl = table(["Partner","Plates not on BOLD","Note"], partner_rows)
 
-    content = stats
+    fbox = files_box(
+        inputs=["bioscan_plate_status_ALL_YYYYMMDD.csv"],
+        outputs=["missing_plates_ALL_YYYYMMDD.txt", "bold_plate_summary_YYYYMMDD.csv"],
+    )
+    content = fbox + stats
     if len(old) > 0:
         content += alert(
-            f"⚠ {len(old)} plates submitted >180 days ago still not on BOLD.",
+            f"⚠ {len(old)} plates submitted >90 days ago still not on BOLD.",
             "warn"
         )
     content += "<h3>All partners with plates not on BOLD</h3>" + partner_tbl
@@ -750,7 +825,12 @@ def build_plate_qc(d):
         "info"
     )
 
-    content = methodology + stats + two_col + "<h3>QC category breakdown</h3>" + cat_tbl
+    fbox = files_box(
+        inputs=["bioscan_plate_status_ALL_YYYYMMDD.csv", "QC FASTA files (per batch)",
+                "mBRAVE QC outputs"],
+        outputs=["plate_summary_all_ALL_YYYYMMDD.csv", "plate_summary_categories_ALL_YYYYMMDD.csv"],
+    )
+    content = fbox + methodology + stats + two_col + "<h3>QC category breakdown</h3>" + cat_tbl
     return card("4. Plate-Level QC Summary", content, "s4")
 
 
@@ -861,7 +941,14 @@ def build_repeat(d):
         "info"
     )
 
-    content = (stats + "<h3>Total pass count comparison</h3>" + approach_tbl +
+    fbox = files_box(
+        inputs=["bioscan_plate_status_ALL_YYYYMMDD.csv", "plate_summary_all_ALL_YYYYMMDD.csv",
+                "QC FASTA files (per batch)"],
+        outputs=["repeat_analysis_YYYYMMDD.csv", "repeat_analysis_YYYYMMDD.xlsx",
+                 "repeat_specimens_summary_YYYYMMDD.csv", "repeat_specimens_transitions_YYYYMMDD.csv",
+                 "repeat_specimens_long_YYYYMMDD.csv", "repeat_specimens_wide_YYYYMMDD.csv"],
+    )
+    content = (fbox + stats + "<h3>Total pass count comparison</h3>" + approach_tbl +
                rec + "<h3>By partner</h3>" + partner_tbl +
                "<h3>Specimen-level summary</h3>" + spec_html + trans_html)
     return card("5. Repeat Sequencing", content, "s5")
@@ -924,7 +1011,13 @@ def build_missing_specimens(d):
     worst_html = "<h3>Worst batches for Cat 2 High</h3>" + \
                  table(["Batch","Cat2_high","% of batch"], worst_rows) if worst_rows else ""
 
-    content = stats + cat_tbl + partner_html + worst_html
+    fbox = files_box(
+        inputs=["bioscan_plate_status_ALL_YYYYMMDD.csv", "portal_plates_from_dump.csv",
+                "mBRAVE QC outputs (per batch)"],
+        outputs=["missing_specimens_categorised_YYYYMMDD.csv",
+                 "missing_specimens_batch_summary_YYYYMMDD.csv"],
+    )
+    content = fbox + stats + cat_tbl + partner_html + worst_html
     return card("6. Missing Specimens & Assembly Failures", content, "s6")
 
 
@@ -967,7 +1060,7 @@ def build_bold_flags(d):
         ("With BIN URI", fmt(with_bin)),
         ("Without BIN URI", fmt(total_wb-with_bin)),
         ("Any quality flag", badge(fmt(any_flag),"red")),
-        ("Stop codon", fmt(stop_codon)),
+        ("Stop codon (flag only)", fmt(stop_codon)),
         ("Contamination", fmt(contam)),
         ("Flagged record", fmt(flagged_rec)),
     ])
@@ -978,9 +1071,9 @@ def build_bold_flags(d):
         [badge("QC_ONLY","amber"), fmt(qc_only), pct(qc_only,total_comp),
          "Passed QC, not on BOLD", badge("Upload to BOLD","amber")],
         [badge("DIFFERENT","red"), fmt(different), pct(different,total_comp),
-         "QC has better sequence", badge("Resubmit to BOLD","red")],
+         "QC sequence differs from BOLD — resubmission may assign a BIN", badge("Resubmit to BOLD","red")],
         ["IDENTICAL", fmt(identical), pct(identical,total_comp),
-         "Same sequence in both", "Expert review"],
+         "Same sequence in both — flag is informational", "Expert review"],
         ["BOLD_ONLY", fmt(bold_only), pct(bold_only,total_comp),
          "On BOLD, not in QC", "Investigate"],
     ]
@@ -1010,7 +1103,22 @@ def build_bold_flags(d):
                           alert("Same sequence in QC and BOLD — no automated fix possible.","warn") + \
                           table(["Partner","Specimens"], rows)
 
-    content = (stats + "<h3>Sequence concordance (QC FASTA vs BOLD)</h3>" +
+    fbox = files_box(
+        inputs=["BOLD workbench export (manual download)", "QC FASTA files (per batch)",
+                "bioscan_plate_status_ALL_YYYYMMDD.csv"],
+        outputs=["bold_workbench_report_YYYYMMDD.txt", "bold_workbench_plates_YYYYMMDD.csv",
+                 "bold_workbench_combined.csv", "bold_flagged_comparison_YYYYMMDD.csv",
+                 "bold_needs_resubmission_YYYYMMDD.csv", "bold_flagged_no_alternative_YYYYMMDD.csv"],
+    )
+    stop_note = alert(
+        "ℹ <strong>Stop codons</strong> are flagged by BOLD as a quality indicator but do "
+        "<strong>not</strong> affect which sequence is selected by the QC pipeline. A stop "
+        "codon flag on BOLD does not mean the sequence is wrong — it is informational only "
+        "and requires expert review rather than automated resubmission.",
+        "info"
+    )
+    content = (fbox + stats + stop_note +
+               "<h3>Sequence concordance for flagged specimens (QC FASTA vs BOLD)</h3>" +
                conc_tbl + resub_html + no_alt_html)
     return card("7. BOLD Quality Flags", content, "s7")
 
@@ -1023,9 +1131,8 @@ def build_bold_concordance(d):
                     alert("No concordance data found. Run bold_sequence_concordance.py --exclude-bge", "warn"),
                     "s8")
 
-    # Load summary txt for total counts including IDENTICAL
-    # We only have non-identical rows in the CSV — reconstruct totals from summary if available
-    total_on_bold = len(df)  # minimum — excludes identical
+    # Only non-identical rows are saved in the CSV
+    total_on_bold = len(df)
 
     vc = df['status'].value_counts() if 'status' in df.columns else pd.Series()
 
@@ -1036,9 +1143,27 @@ def build_bold_concordance(d):
     n_close        = int(vc.get('CLOSE', 0))
     n_bold_only    = int(vc.get('BOLD_ONLY', 0))
 
+    # Cross-reference with batch family analysis to identify how many DIFFERENT
+    # records are explained by CONFLICT_DIFFERENT in the repeat batch families.
+    bf = d.get('batch_family_summ', pd.DataFrame())
+    batch_conflict_ids = set()
+    if not bf.empty and 'specimen_id' in bf.columns and 'specimen_status' in bf.columns:
+        batch_conflict_ids = set(
+            bf.loc[bf['specimen_status'] == 'CONFLICT_DIFFERENT', 'specimen_id'].dropna()
+        )
+
+    n_batch_explained = 0
+    n_truly_different = n_different
+    if n_different > 0 and 'specimen_id' in df.columns and batch_conflict_ids:
+        diff_ids = set(df.loc[df['status'] == 'DIFFERENT', 'specimen_id'].dropna())
+        n_batch_explained = len(diff_ids & batch_conflict_ids)
+        n_truly_different = n_different - n_batch_explained
+
     stats = stat_grid([
         ("Non-identical records", fmt(total_on_bold)),
-        ("Genuinely different ⚠", badge(fmt(n_different), "red")),
+        ("DIFFERENT (total)", badge(fmt(n_different), "red")),
+        ("  — explained by batch family", fmt(n_batch_explained)),
+        ("  — unexplained (true diff) ⚠", badge(fmt(n_truly_different), "red")),
         ("Trimming only (5' end)", fmt(n_trim5)),
         ("Trimming only (3' end)", fmt(n_trim3)),
         ("Near-identical (>99%)", fmt(n_near)),
@@ -1046,43 +1171,60 @@ def build_bold_concordance(d):
     ])
 
     note = alert(
-        "ℹ The February 2026 QC rerun may have selected a different consensus sequence "
-        "for some specimens compared to what was originally uploaded to BOLD. "
-        "<strong>TRIM_5PRIME/TRIM_3PRIME</strong> = length difference only, sequences are otherwise identical. "
-        "<strong>DIFFERENT</strong> = genuinely different sequence — the QC rerun chose a different consensus.",
+        "ℹ Compares the QC FASTA sequences uploaded to BOLD against the sequences currently on BOLD. "
+        "<strong>TRIM_5PRIME/TRIM_3PRIME</strong> = length difference only — sequences are otherwise identical, no action needed. "
+        "<strong>DIFFERENT</strong> = the sequence on BOLD differs from the QC FASTA. "
+        "Some of these differences are now explained by the repeat batch family analysis (Section 9): "
+        "specimens sequenced in multiple batches may have a different consensus called in each run. "
+        "The <em>unexplained</em> count above shows the true number of specimens where the QC FASTA "
+        "and BOLD sequence differ for reasons other than batch family repeats.",
         "info"
     )
 
     status_rows = [
         [badge("IDENTICAL","green"), "—", "100% match — sequence unchanged", "No action"],
-        [badge("TRIM_5PRIME","blue"), fmt(n_trim5), "Extra bases at 5' end of FASTA only — right-aligned sequences are identical", "No action — trimming only"],
-        [badge("TRIM_3PRIME","blue"), fmt(n_trim3), "Extra bases at 3' end of FASTA only — left-aligned sequences are identical", "No action — trimming only"],
+        [badge("TRIM_5PRIME","blue"), fmt(n_trim5), "Extra bases at 5′ end of FASTA only — right-aligned sequences are identical", "No action — trimming only"],
+        [badge("TRIM_3PRIME","blue"), fmt(n_trim3), "Extra bases at 3′ end of FASTA only — left-aligned sequences are identical", "No action — trimming only"],
         [badge("NEAR_IDENTICAL","amber"), fmt(n_near), ">99% overlap — minor formatting difference", "Review"],
-        [badge("CLOSE","amber"), fmt(n_close), "95-99% identity", "Review"],
-        [badge("DIFFERENT","red"), fmt(n_different), "Genuinely different sequence from QC rerun", badge("Investigate","red")],
+        [badge("CLOSE","amber"), fmt(n_close), "95–99% identity", "Review"],
+        [badge("DIFFERENT","red"), fmt(n_different),
+         f"Sequence differs from BOLD upload: {fmt(n_batch_explained)} explained by batch family repeats, "
+         f"{fmt(n_truly_different)} unexplained",
+         badge("Investigate unexplained","red")],
         [badge("BOLD_ONLY","amber"), fmt(n_bold_only), "On BOLD but not in any batch FASTA", "Investigate — pre-pipeline upload"],
     ]
     status_tbl = table(["Status","Count","Meaning","Action"], status_rows)
 
-    # DIFFERENT by batch
+    # DIFFERENT (unexplained) by batch
+    batch_tbl = ""
     if n_different > 0 and 'best_batch' in df.columns:
-        diff = df[df['status']=='DIFFERENT']
-        by_batch = diff['best_batch'].value_counts().head(10)
-        batch_rows = [[b, fmt(int(n))] for b,n in by_batch.items()]
-        batch_tbl = "<h3>DIFFERENT specimens by batch</h3>" +                     table(["Batch","Specimens"], batch_rows)
-    else:
-        batch_tbl = ""
+        diff = df[df['status'] == 'DIFFERENT'].copy()
+        if batch_conflict_ids and 'specimen_id' in diff.columns:
+            diff = diff[~diff['specimen_id'].isin(batch_conflict_ids)]
+        if not diff.empty:
+            by_batch = diff['best_batch'].value_counts().head(10)
+            batch_rows = [[b, fmt(int(n))] for b, n in by_batch.items()]
+            batch_tbl = "<h3>Unexplained DIFFERENT by batch</h3>" + table(["Batch","Specimens"], batch_rows)
 
-    # DIFFERENT by partner
+    # DIFFERENT (unexplained) by partner
+    partner_tbl = ""
     if n_different > 0 and 'partner' in df.columns:
-        diff = df[df['status']=='DIFFERENT']
-        by_partner = diff['partner'].value_counts().head(15)
-        partner_rows = [[p, fmt(int(n))] for p,n in by_partner.items()]
-        partner_tbl = "<h3>DIFFERENT specimens by partner</h3>" +                       table(["Partner","Specimens"], partner_rows)
-    else:
-        partner_tbl = ""
+        diff = df[df['status'] == 'DIFFERENT'].copy()
+        if batch_conflict_ids and 'specimen_id' in diff.columns:
+            diff = diff[~diff['specimen_id'].isin(batch_conflict_ids)]
+        if not diff.empty:
+            by_partner = diff['partner'].value_counts().head(15)
+            partner_rows = [[p, fmt(int(n))] for p, n in by_partner.items()]
+            partner_tbl = "<h3>Unexplained DIFFERENT by partner</h3>" + table(["Partner","Specimens"], partner_rows)
 
-    content = note + stats + "<h3>Status breakdown</h3>" + status_tbl +               "<div class='two-col'>" + batch_tbl + partner_tbl + "</div>"
+    fbox = files_box(
+        inputs=["QC FASTA files (per batch)", "BOLD sequence data (via API/download)",
+                "bioscan_plate_status_ALL_YYYYMMDD.csv"],
+        outputs=["bold_sequence_concordance_ALL_YYYYMMDD.csv",
+                 "bold_sequence_concordance_ALL_YYYYMMDD_summary.txt"],
+    )
+    content = (fbox + note + stats + "<h3>Status breakdown</h3>" + status_tbl +
+               "<div class='two-col'>" + batch_tbl + partner_tbl + "</div>")
     return card("8. BOLD Sequence Concordance (QC FASTA vs BOLD)", content, "s8")
 
 
@@ -1171,7 +1313,17 @@ def build_batch_family(d):
                              badge(fmt(n_fam_conf),"red") if n_fam_conf else "0"])
         fam_html = "<h3>By batch family</h3>" +                    table(["Family","Specimens","Additional pass","Conflicts"], fam_rows)
 
-    content = note + stats + "<h3>Status breakdown</h3>" + status_tbl +               "<div class='two-col'>" + partner_html + fam_html + "</div>"
+    fbox = files_box(
+        inputs=["QC FASTA files (per batch family)", "BOLD sequence data (via API/download)",
+                "bioscan_plate_status_ALL_YYYYMMDD.csv"],
+        outputs=["batch_family_specimen_batch_YYYYMMDD_ALL.csv",
+                 "batch_family_summary_YYYYMMDD_ALL.csv",
+                 "repeat_batch_additional_sequences_YYYYMMDD.fasta",
+                 "repeat_batch_additional_sequences_YYYYMMDD.csv",
+                 "repeat_batch_additional_sequences_YYYYMMDD_summary.txt"],
+    )
+    content = (fbox + note + stats + "<h3>Status breakdown</h3>" + status_tbl +
+               "<div class='two-col'>" + partner_html + fam_html + "</div>")
     return card("9. Repeat Batch Family Comparison", content, "s9")
 
 
@@ -1191,7 +1343,7 @@ def build_actions(d):
         not_seq = df[df['missing_at']=='mbrave'].copy()
         if not not_seq.empty:
             not_seq['submit_date'] = pd.to_datetime(not_seq['submit_date'], errors='coerce')
-            not_seq_old = int(((pd.Timestamp.now()-not_seq['submit_date']).dt.days >= 180).sum())
+            not_seq_old = int(((pd.Timestamp.now()-not_seq['submit_date']).dt.days >= 90).sum())
         n_not_bold = int((df['missing_at']=='bold').sum())
 
     cat2_high = 0
@@ -1207,7 +1359,7 @@ def build_actions(d):
 
     content = "<h3>🔴 High Priority — Must be resolved before data freeze</h3>"
     content += action("HIGH","1",
-        f"Investigate {fmt(not_seq_old)} plates with no sequencing data after >180 days",
+        f"Investigate {fmt(not_seq_old)} plates with no sequencing data after >90 days",
         "FRBX and FACE are most critical — submitted 2023, still unsequenced.",
         "missing_plates_ALL_YYYYMMDD.txt", "high")
     content += action("HIGH","2",
@@ -1220,7 +1372,7 @@ def build_actions(d):
         "bold_flagged_comparison_YYYYMMDD.csv (filter sequence_status == QC_ONLY)", "high")
     content += action("HIGH","4",
         f"Upload {fmt(n_not_bold)} QC-passed plates to BOLD",
-        "Prioritise plates submitted >180 days ago.",
+        "Prioritise plates submitted >90 days ago.",
         "bioscan_plate_status_ALL_YYYYMMDD.csv", "high")
     content += action("HIGH","5",
         "Investigate BCLT — all specimens on BOLD, all flagged, zero BINs",
@@ -1251,6 +1403,13 @@ def build_actions(d):
         "Sequences on BOLD but not in QC FASTA — possibly pre-dating current pipeline.",
         "bold_flagged_comparison_YYYYMMDD.csv", "low")
 
+    fbox = files_box(
+        inputs=["bioscan_plate_status_ALL_YYYYMMDD.csv", "bold_flagged_comparison_YYYYMMDD.csv",
+                "bold_needs_resubmission_YYYYMMDD.csv", "missing_specimens_categorised_YYYYMMDD.csv",
+                "repeat_specimens_transitions_YYYYMMDD.csv", "missing_plates_ALL_YYYYMMDD.txt"],
+        outputs=["(no new CSVs — uses outputs from all preceding sections)"],
+    )
+    content = fbox + content
     return card("10. Actions Required", content, "s10")
 
 
