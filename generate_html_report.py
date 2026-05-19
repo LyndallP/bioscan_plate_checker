@@ -18,7 +18,7 @@ import re
 import pandas as pd
 
 import config
-from utils import is_bge_plate, resolve_run_dir
+from utils import is_bge_plate
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -449,6 +449,7 @@ def load_all(results_dir, exclude_bge):
     bold_concordance   = latest('bold_sequence_concordance_ALL_*.csv')
     if bold_concordance.empty:
         bold_concordance = latest('bold_sequence_concordance_*_*.csv')
+    batch_family_summ  = latest('batch_family_summary_*_ALL.csv')
 
     if exclude_bge:
         for df in [plate_status, plate_summ, plate_cats, repeat_plate]:
@@ -471,6 +472,7 @@ def load_all(results_dir, exclude_bge):
         bold_wb_plates=bold_wb_plates,
         bold_report_path=bold_report_path,
         bold_concordance=bold_concordance,
+        batch_family_summ=batch_family_summ,
     )
 
 
@@ -1084,6 +1086,95 @@ def build_bold_concordance(d):
     return card("8. BOLD Sequence Concordance (QC FASTA vs BOLD)", content, "s8")
 
 
+def build_batch_family(d):
+    """Section 9 — Repeat batch family sequence comparison."""
+    df = d.get('batch_family_summ', pd.DataFrame())
+    if df.empty:
+        return card("9. Repeat Batch Family Comparison",
+                    alert("No batch family data found. Run batch_family_sequence_comparison.py", "warn"),
+                    "s9")
+
+    total = len(df)
+    vc = df['specimen_status'].value_counts() if 'specimen_status' in df.columns else pd.Series()
+
+    n_ok        = int(vc.get('OK', 0))
+    n_extra     = int(vc.get('ADDITIONAL_PASS_AVAILABLE', 0))
+    n_conf_diff = int(vc.get('CONFLICT_DIFFERENT', 0))
+    n_conf_cl   = int(vc.get('CONFLICT_CLOSE', 0))
+
+    # Non-BGE additional passes not on BOLD
+    bge = {'BGEP','BGEG','BGPT','BGKU'}
+    import re as _re
+    def _partner(sid):
+        if not sid: return None
+        s = str(sid).upper()
+        if s.startswith('TOL-'): return None
+        m = _re.match(r'^([A-Z]{4})[_-]', s)
+        return m.group(1) if m else None
+
+    extra = df[
+        (df['specimen_status'] == 'ADDITIONAL_PASS_AVAILABLE') &
+        (df['is_on_bold'] == 'False')
+    ].copy()
+    extra['partner'] = extra['specimen_id'].apply(_partner)
+    non_bge_extra = extra[~extra['partner'].isin(bge) & extra['partner'].notna()]
+
+    stats = stat_grid([
+        ("Total specimens", fmt(total)),
+        ("OK — sequences consistent", fmt(n_ok)),
+        ("Additional pass available", badge(fmt(n_extra), "amber")),
+        ("Non-BGE not on BOLD", badge(fmt(len(non_bge_extra)), "red")),
+        ("Conflict — different sequence", badge(fmt(n_conf_diff), "red")),
+        ("Conflict — close sequence", badge(fmt(n_conf_cl), "amber")),
+    ])
+
+    note = alert(
+        "ℹ These are specimens where the same plates were sequenced in multiple batch "
+        "family members (RnD runs, splits, repeats). "
+        "<strong>ADDITIONAL_PASS_AVAILABLE</strong> = a repeat batch has a QC-passed sequence "
+        "not yet on BOLD — opportunity to increase coverage. "
+        "<strong>CONFLICT</strong> = different sequences called for the same specimen across runs.",
+        "info"
+    )
+
+    # Status table
+    status_rows = [
+        [badge("OK","green"),                    fmt(n_ok),        "All sequences consistent across batch members"],
+        [badge("ADDITIONAL_PASS_AVAILABLE","amber"), fmt(n_extra), "Repeat batch has QC-passed sequence not yet on BOLD"],
+        [badge("CONFLICT_DIFFERENT","red"),       fmt(n_conf_diff), "Genuinely different sequences across batch members"],
+        [badge("CONFLICT_CLOSE","amber"),         fmt(n_conf_cl),   "Close but not identical sequences across batch members"],
+    ]
+    status_tbl = table(["Status","Count","Meaning"], status_rows)
+
+    # Non-BGE additional by partner
+    partner_html = ""
+    if len(non_bge_extra) > 0:
+        by_partner = non_bge_extra['partner'].value_counts().head(15)
+        p_rows = [[p, fmt(int(n))] for p,n in by_partner.items()]
+        partner_html = (f"<h3>Non-BGE additional sequences by partner "
+                        f"({fmt(len(non_bge_extra))} total)</h3>") +                        table(["Partner","Specimens"], p_rows)
+
+    # By batch family
+    fam_html = ""
+    if 'batch_family' in df.columns:
+        by_fam = df.groupby(['batch_family','specimen_status']).size().reset_index()
+        fam_rows = []
+        for fam in sorted(df['batch_family'].unique()):
+            fam_data = by_fam[by_fam['batch_family']==fam]
+            n_fam_extra = int(fam_data[fam_data['specimen_status']=='ADDITIONAL_PASS_AVAILABLE'][0].sum())                 if len(fam_data[fam_data['specimen_status']=='ADDITIONAL_PASS_AVAILABLE']) > 0 else 0
+            n_fam_conf  = int(fam_data[fam_data['specimen_status'].isin(
+                ['CONFLICT_DIFFERENT','CONFLICT_CLOSE'])][0].sum())                 if len(fam_data[fam_data['specimen_status'].isin(
+                ['CONFLICT_DIFFERENT','CONFLICT_CLOSE'])]) > 0 else 0
+            n_fam_tot   = int((df['batch_family']==fam).sum())
+            fam_rows.append([fam, fmt(n_fam_tot),
+                             badge(fmt(n_fam_extra),"amber") if n_fam_extra else "0",
+                             badge(fmt(n_fam_conf),"red") if n_fam_conf else "0"])
+        fam_html = "<h3>By batch family</h3>" +                    table(["Family","Specimens","Additional pass","Conflicts"], fam_rows)
+
+    content = note + stats + "<h3>Status breakdown</h3>" + status_tbl +               "<div class='two-col'>" + partner_html + fam_html + "</div>"
+    return card("9. Repeat Batch Family Comparison", content, "s9")
+
+
 def build_actions(d):
     df         = d['plate_status']
     bold_comp  = d['bold_flagged_comp']
@@ -1160,7 +1251,7 @@ def build_actions(d):
         "Sequences on BOLD but not in QC FASTA — possibly pre-dating current pipeline.",
         "bold_flagged_comparison_YYYYMMDD.csv", "low")
 
-    return card("9. Actions Required", content, "s9")
+    return card("10. Actions Required", content, "s10")
 
 
 # ── Assemble HTML ─────────────────────────────────────────────────────────────
@@ -1178,7 +1269,9 @@ def build_html(sections_html, meta, exclude_bge):
         ("s5","5. Repeat Sequencing"),
         ("s6","6. Missing Specimens"),
         ("s7","7. BOLD Quality Flags"),
-        ("s9","9. Actions Required"),
+        ("s9","9. BOLD Sequence Concordance"),
+        ("s10","10. Repeat Batch Families"),
+        ("s11","11. Actions Required"),
     ]
     nav_html = '<span class="nav-section">Sections</span>'
     nav_html += "".join(f'<a href="#{id_}">{label}</a>' for id_,label in nav_items)
@@ -1226,21 +1319,18 @@ def main():
     parser.add_argument('--exclude-bge', action='store_true',
         help='Exclude BGE partners (BGEP, BGEG, BGKU, BGPT)')
     parser.add_argument('--output', default=None,
-        help='Output HTML path (default: run_dir/bioscan_report_YYYYMMDD_HHMMSS.html)')
-    parser.add_argument('--run-dir', default=None,
-        help='Output directory (overrides BIOSCAN_RUN_DIR env var and auto-generate)')
+        help='Output HTML path (default: RESULTS_DIR/bioscan_report_YYYYMMDD.html)')
     args = parser.parse_args()
 
-    run_dir = resolve_run_dir(args.run_dir)
-    run_ts  = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+    today = datetime.datetime.now().strftime('%Y%m%d')
     results = config.RESULTS_DIR
+    os.makedirs(results, exist_ok=True)
 
     if args.output is None:
-        args.output = os.path.join(run_dir, f'bioscan_report_{run_ts}.html')
+        args.output = os.path.join(results, f'bioscan_report_{today}.html')
 
     print(f"Generating BIOSCAN HTML report...")
     print(f"  Results dir:  {results}")
-    print(f"  Output dir:   {run_dir}")
     print(f"  Exclude BGE:  {args.exclude_bge}")
     print(f"  Output:       {args.output}")
     print()
@@ -1256,6 +1346,7 @@ def main():
         build_missing_specimens(d),
         build_bold_flags(d),
         build_bold_concordance(d),
+        build_batch_family(d),
         build_actions(d),
     ]
 
