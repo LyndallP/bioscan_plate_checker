@@ -86,6 +86,8 @@ else
     echo ""
 fi
 
+run_step positive_control_analysis.py $BGE_FLAG
+
 run_step generate_html_report.py   $BGE_FLAG
 run_step generate_summary_report.py $BGE_FLAG
 

@@ -512,6 +512,8 @@ def load_all(results_dir, exclude_bge):
     if bold_concordance.empty:
         bold_concordance = latest('bold_sequence_concordance_*_*.csv')
     batch_family_summ  = latest('batch_family_summary_*_ALL.csv')
+    pos_ctrl_plates    = latest('positive_control_plates_*.csv')
+    pos_ctrl_batches   = latest('positive_control_batch_summary_*.csv')
 
     if exclude_bge:
         for df in [plate_status, plate_summ, plate_cats, repeat_plate]:
@@ -535,6 +537,8 @@ def load_all(results_dir, exclude_bge):
         bold_report_path=bold_report_path,
         bold_concordance=bold_concordance,
         batch_family_summ=batch_family_summ,
+        pos_ctrl_plates=pos_ctrl_plates,
+        pos_ctrl_batches=pos_ctrl_batches,
     )
 
 
@@ -1327,6 +1331,131 @@ def build_batch_family(d):
     return card("9. Repeat Batch Family Comparison", content, "s9")
 
 
+def build_positive_controls(d):
+    """Section 10 — Positive control analysis and re-sequencing candidates."""
+    df      = d.get('pos_ctrl_plates',  pd.DataFrame())
+    batches = d.get('pos_ctrl_batches', pd.DataFrame())
+
+    if df.empty:
+        return card("10. Positive Control Analysis",
+                    alert("No positive control data found. "
+                          "Run positive_control_analysis.py", "warn"), "s10")
+
+    for col in ['pos_control_reads', 'batch_median_pos_ctrl',
+                'pos_ctrl_pct_of_median', 'pass_rate', 'mean_pass_rate',
+                'n_specimens_umi', 'n_specimens_portal',
+                'n_pass', 'n_on_hold', 'n_fail', 'n_total_qc']:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+
+    n_total     = len(df)
+    n_low_ctrl  = int(df['low_pos_ctrl_flag'].astype(str).str.upper().eq('TRUE').sum()) \
+                  if 'low_pos_ctrl_flag' in df.columns else 0
+    n_poor_batch= int(df['poor_batch_flag'].astype(str).str.upper().eq('TRUE').sum()) \
+                  if 'poor_batch_flag' in df.columns else 0
+    n_candidates= int(df['resequence_candidate'].astype(str).str.upper().eq('TRUE').sum()) \
+                  if 'resequence_candidate' in df.columns else 0
+    n_batches_poor = 0
+    if not batches.empty and 'poor_batch_flag' in batches.columns:
+        n_batches_poor = int(
+            batches['poor_batch_flag'].astype(str).str.upper().eq('TRUE').sum()
+        )
+
+    stats = stat_grid([
+        ("Plate-batch records",   fmt(n_total)),
+        ("Low pos-ctrl plates ⚠", badge(fmt(n_low_ctrl),   "red")),
+        ("Poor batches (bot. 20%)", badge(fmt(n_batches_poor), "amber")),
+        ("Re-sequence candidates", badge(fmt(n_candidates), "red")),
+    ])
+
+    note = alert(
+        "ℹ <strong>Low positive control</strong> = pos control reads below 50% of the "
+        "batch median for that run. This suggests the plate may have had poor sequencing "
+        "performance and is a candidate for re-sequencing. "
+        "<strong>Poor batch</strong> = batch in the bottom 20% of all batches by mean "
+        "plate pass rate. A plate is a re-sequence candidate if either flag is set.",
+        "info"
+    )
+
+    # Flagged plates table (top 30 by lowest % of median)
+    flagged_html = ""
+    if 'resequence_candidate' in df.columns:
+        cands = df[
+            df['resequence_candidate'].astype(str).str.upper() == 'TRUE'
+        ].copy()
+        if not cands.empty:
+            cands = cands.sort_values('pos_ctrl_pct_of_median').head(30)
+            rows = []
+            for _, r in cands.iterrows():
+                pct_val = r.get('pos_ctrl_pct_of_median')
+                pct_str = f"{pct_val:.1f}%" if pd.notna(pct_val) else "n/a"
+                pct_badge = badge(pct_str, "red") if pd.notna(pct_val) and pct_val < 50 \
+                            else badge(pct_str, "amber")
+
+                pass_r = r.get('pass_rate')
+                pass_str = f"{pass_r:.1f}%" if pd.notna(pass_r) else "n/a"
+
+                umi_n    = fmt(int(r['n_specimens_umi']))    if pd.notna(r.get('n_specimens_umi'))    else "n/a"
+                portal_n = fmt(int(r['n_specimens_portal'])) if pd.notna(r.get('n_specimens_portal')) else "n/a"
+
+                flags = []
+                if str(r.get('low_pos_ctrl_flag', '')).upper() == 'TRUE':
+                    flags.append(badge("Low ctrl","red"))
+                if str(r.get('poor_batch_flag', '')).upper() == 'TRUE':
+                    flags.append(badge("Poor batch","amber"))
+
+                rows.append([
+                    str(r.get('batch', '')),
+                    str(r.get('plate_id', '')),
+                    fmt(int(r['pos_control_reads'])) if pd.notna(r.get('pos_control_reads')) else "n/a",
+                    pct_badge,
+                    pass_str,
+                    f"{umi_n} / {portal_n}",
+                    " ".join(flags),
+                ])
+            flagged_html = (
+                f"<h3>Re-sequence candidates — top {len(rows)} by lowest pos-ctrl</h3>" +
+                table(["Batch","Plate","Pos ctrl reads","% of batch median",
+                       "Pass rate (this batch)","Specimens (UMI / portal)","Flags"], rows)
+            )
+
+    # Poor batches table
+    poor_batch_html = ""
+    if not batches.empty and 'poor_batch_flag' in batches.columns:
+        for col in ['mean_pass_rate', 'median_pos_ctrl', 'n_plates']:
+            if col in batches.columns:
+                batches[col] = pd.to_numeric(batches[col], errors='coerce')
+        poor = batches[
+            batches['poor_batch_flag'].astype(str).str.upper() == 'TRUE'
+        ].sort_values('mean_pass_rate')
+        if not poor.empty:
+            p_rows = []
+            for _, r in poor.iterrows():
+                pass_r = r.get('mean_pass_rate')
+                p_rows.append([
+                    str(r.get('batch', '')),
+                    fmt(int(r['n_plates'])) if pd.notna(r.get('n_plates')) else "n/a",
+                    f"{pass_r:.1f}%" if pd.notna(pass_r) else "n/a",
+                    fmt(int(r['median_pos_ctrl'])) if pd.notna(r.get('median_pos_ctrl')) else "n/a",
+                ])
+            poor_batch_html = (
+                "<h3>Poor-performing batches (bottom 20% by mean pass rate)</h3>" +
+                table(["Batch","Plates","Mean pass rate","Median pos-ctrl reads"], p_rows)
+            )
+
+    fbox = files_box(
+        inputs=["umi.*_control_pos_stats.txt (all batches)",
+                "umi.*_sample_stats.txt (all batches)",
+                "qc_portal_batch*.csv (all batches)",
+                config.PORTAL_DUMP_TSV.split('/')[-1]],
+        outputs=["positive_control_plates_YYYYMMDD.csv",
+                 "positive_control_batch_summary_YYYYMMDD.csv"],
+    )
+    content = (fbox + note + stats + flagged_html +
+               "<div class='two-col'>" + poor_batch_html + "</div>")
+    return card("10. Positive Control Analysis", content, "s10")
+
+
 def build_actions(d):
     df         = d['plate_status']
     bold_comp  = d['bold_flagged_comp']
@@ -1410,7 +1539,7 @@ def build_actions(d):
         outputs=["(no new CSVs — uses outputs from all preceding sections)"],
     )
     content = fbox + content
-    return card("10. Actions Required", content, "s10")
+    return card("11. Actions Required", content, "s11")
 
 
 # ── Assemble HTML ─────────────────────────────────────────────────────────────
@@ -1430,7 +1559,8 @@ def build_html(sections_html, meta, exclude_bge):
         ("s7","7. BOLD Quality Flags"),
         ("s9","9. BOLD Sequence Concordance"),
         ("s10","10. Repeat Batch Families"),
-        ("s11","11. Actions Required"),
+        ("s11","11. Positive Controls"),
+        ("s12","12. Actions Required"),
     ]
     nav_html = '<span class="nav-section">Sections</span>'
     nav_html += "".join(f'<a href="#{id_}">{label}</a>' for id_,label in nav_items)
@@ -1506,6 +1636,7 @@ def main():
         build_bold_flags(d),
         build_bold_concordance(d),
         build_batch_family(d),
+        build_positive_controls(d),
         build_actions(d),
     ]
 
