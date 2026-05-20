@@ -36,7 +36,7 @@ import pandas as pd
 from collections import defaultdict
 
 import config
-from utils import (build_batch_cross_map, resolve_batches,
+from utils import (resolve_batches,
                    batch_sort_key, matches_partner, safe_read_csv, resolve_run_dir)
 
 
@@ -106,9 +106,7 @@ def load_all_qc_portal(qc_dir=None, partner=None, verbose=False):
     if qc_dir is None:
         qc_dir = config.QC_DIR
 
-    (mbrave_to_qc, qc_to_mbrave, issues,
-     mbrave_resolved, qc_resolved,
-     mbrave_skipped, qc_skipped) = build_batch_cross_map(config.MBRAVE_DIR, qc_dir)
+    qc_resolved, _ = resolve_batches(qc_dir, include_special=True)
 
     all_dfs = []
     for qc_folder in qc_resolved:
