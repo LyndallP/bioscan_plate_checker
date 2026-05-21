@@ -55,17 +55,18 @@ run_step() {
 }
 
 # ── Steps ─────────────────────────────────────────────────────────────────────
-run_step plate_status_report.py        --partner ALL $BGE_FLAG
-run_step generate_pipeline_report.py   $BGE_FLAG
+# Note: --exclude-bge is only passed to scripts that accept it.
+run_step plate_status_report.py        --partner ALL
+run_step generate_pipeline_report.py
 run_step bold_summary_from_portal.py   --partner ALL $BGE_FLAG
 run_step plate_summary_all.py          --partner ALL $BGE_FLAG --verbose
 run_step qc_bold_mismatch_portal.py    $BGE_FLAG
-run_step repeat_analysis.py            --partner ALL $BGE_FLAG
-run_step repeat_analysis_specimens.py  --partner ALL $BGE_FLAG
-run_step missing_specimen_analysis.py  --partner ALL $BGE_FLAG
+run_step repeat_analysis.py            --partner ALL
+run_step repeat_analysis_specimens.py  --partner ALL
+run_step missing_specimen_analysis.py  --partner ALL
 
 if [ "$SKIP_WORKBENCH" -eq 0 ]; then
-    run_step bold_workbench_analysis.py --partner ALL --rebuild-cache $BGE_FLAG
+    run_step bold_workbench_analysis.py --partner ALL --rebuild-cache
 else
     echo ">>> Skipping bold_workbench_analysis.py"
     echo ""
@@ -88,7 +89,7 @@ fi
 
 run_step positive_control_analysis.py $BGE_FLAG
 
-run_step generate_html_report.py   $BGE_FLAG
+run_step generate_html_report.py    $BGE_FLAG
 run_step generate_summary_report.py $BGE_FLAG
 
 echo "============================================================"
