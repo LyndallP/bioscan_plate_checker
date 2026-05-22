@@ -82,6 +82,19 @@ def _is_control_specimen(label):
 
 # ── Per-batch data loading ────────────────────────────────────────────────────
 
+def _find_col(df, candidates):
+    """Return the first column name from candidates that exists in df, or None."""
+    for c in candidates:
+        if c in df.columns:
+            return c
+    # Case-insensitive fallback
+    lower_map = {col.lower(): col for col in df.columns}
+    for c in candidates:
+        if c.lower() in lower_map:
+            return lower_map[c.lower()]
+    return None
+
+
 def load_pos_controls(batch_path):
     """
     Read umi.*_control_pos_stats.txt for one batch folder.
@@ -91,19 +104,27 @@ def load_pos_controls(batch_path):
     for f in glob.glob(os.path.join(batch_path, _POS_PATTERN)):
         try:
             df = pd.read_csv(f, sep='\t', dtype=str)
-            if 'Label' not in df.columns:
+            plate_col = _find_col(df, ['Sample Plate ID', 'SamplePlateID', 'Plate', 'plate_id'])
+            count_col = _find_col(df, ['Count', 'count', 'Reads', 'reads', 'Total'])
+            if plate_col is None or count_col is None:
+                # Last resort: look for any column with 'plate' in it
+                plate_col = next((c for c in df.columns if 'plate' in c.lower()), None)
+                count_col = next((c for c in df.columns if 'count' in c.lower() or 'read' in c.lower()), None)
+            if plate_col is None or count_col is None:
+                print(f"  Warning: cannot find plate/count columns in {os.path.basename(f)}. "
+                      f"Columns: {list(df.columns)}")
                 continue
             for _, row in df.iterrows():
-                plate = _normalise_plate(row.get('Sample Plate ID', ''))
-                count_raw = str(row.get('Count', '0')).strip()
+                plate = _normalise_plate(row.get(plate_col, ''))
+                count_raw = str(row.get(count_col, '0')).strip()
                 try:
                     count = int(float(count_raw))
                 except ValueError:
                     count = 0
                 if plate and plate not in ('nan', ''):
                     rows.append({'plate_id': plate, 'pos_control_reads': count})
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"  Warning: could not read {os.path.basename(f)}: {e}")
     return rows
 
 
@@ -118,11 +139,13 @@ def load_umi_specimen_counts(batch_path):
             continue
         try:
             df = pd.read_csv(f, sep='\t', dtype=str)
-            if 'Label' not in df.columns:
+            label_col = _find_col(df, ['Label', 'label', 'SampleID', 'Sample ID'])
+            plate_col = _find_col(df, ['Sample Plate ID', 'SamplePlateID', 'Plate', 'plate_id'])
+            if label_col is None or plate_col is None:
                 continue
             for _, row in df.iterrows():
-                label = str(row.get('Label', '')).strip()
-                plate = _normalise_plate(row.get('Sample Plate ID', ''))
+                label = str(row.get(label_col, '')).strip()
+                plate = _normalise_plate(row.get(plate_col, ''))
                 if not plate or plate in ('nan', ''):
                     continue
                 if _is_control_specimen(label):

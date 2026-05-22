@@ -516,10 +516,44 @@ def load_all(results_dir, exclude_bge):
     pos_ctrl_batches   = latest('positive_control_batch_summary_*.csv')
 
     if exclude_bge:
-        for df in [plate_status, plate_summ, plate_cats, repeat_plate]:
-            if not df.empty and 'plate_id' in df.columns:
-                df.drop(df[df['plate_id'].apply(
-                    lambda x: is_bge_plate(str(x)))].index, inplace=True)
+        def _drop_bge_by_plate(df):
+            if df.empty or 'plate_id' not in df.columns:
+                return df
+            return df[~df['plate_id'].apply(lambda x: is_bge_plate(str(x)))].copy()
+
+        def _drop_bge_by_partner(df):
+            if df.empty or 'partner' not in df.columns:
+                return df
+            bge = {'BGEP', 'BGEG', 'BGPT', 'BGKU'}
+            return df[~df['partner'].isin(bge)].copy()
+
+        def _drop_bge_by_specimen(df):
+            if df.empty or 'specimen_id' not in df.columns:
+                return df
+            def _bge_spec(sid):
+                s = str(sid).upper()
+                if s.startswith('TOL-'):
+                    return False
+                import re as _re
+                m = _re.match(r'^([A-Z]{4})[_-]', s)
+                code = m.group(1) if m else None
+                return code in {'BGEP', 'BGEG', 'BGPT', 'BGKU'}
+            return df[~df['specimen_id'].apply(_bge_spec)].copy()
+
+        plate_status       = _drop_bge_by_plate(plate_status)
+        plate_summ         = _drop_bge_by_plate(plate_summ)
+        plate_cats         = _drop_bge_by_plate(plate_cats)
+        repeat_plate       = _drop_bge_by_plate(repeat_plate)
+        missing_cats       = _drop_bge_by_plate(missing_cats)
+        bold_needs_resub   = _drop_bge_by_plate(bold_needs_resub)
+        bold_flagged_no_alt= _drop_bge_by_plate(bold_flagged_no_alt)
+        bold_flagged_comp  = _drop_bge_by_plate(bold_flagged_comp)
+        bold_wb_plates     = _drop_bge_by_plate(bold_wb_plates)
+        bold_concordance   = _drop_bge_by_specimen(bold_concordance)
+        batch_family_summ  = _drop_bge_by_specimen(batch_family_summ)
+        repeat_transitions = _drop_bge_by_partner(repeat_transitions)
+        repeat_summary     = _drop_bge_by_specimen(repeat_summary)
+        pos_ctrl_plates    = _drop_bge_by_plate(pos_ctrl_plates)
 
     return dict(
         plate_status=plate_status,
@@ -1384,7 +1418,13 @@ def build_positive_controls(d):
             df['resequence_candidate'].astype(str).str.upper() == 'TRUE'
         ].copy()
         if not cands.empty:
-            cands = cands.sort_values('pos_ctrl_pct_of_median').head(30)
+            # Sort: low pass rate first (most urgent), then low pos-ctrl %
+            # NaN pass_rate goes last so plates with QC data are prioritised
+            cands = cands.sort_values(
+                ['pass_rate', 'pos_ctrl_pct_of_median'],
+                ascending=[True, True],
+                na_position='last',
+            ).head(30)
             rows = []
             for _, r in cands.iterrows():
                 pct_val = r.get('pos_ctrl_pct_of_median')
@@ -1414,7 +1454,7 @@ def build_positive_controls(d):
                     " ".join(flags),
                 ])
             flagged_html = (
-                f"<h3>Re-sequence candidates — top {len(rows)} by lowest pos-ctrl</h3>" +
+                f"<h3>Re-sequence candidates — top {len(rows)} by lowest pass rate then lowest pos-ctrl</h3>" +
                 table(["Batch","Plate","Pos ctrl reads","% of batch median",
                        "Pass rate (this batch)","Specimens (UMI / portal)","Flags"], rows)
             )
@@ -1557,10 +1597,10 @@ def build_html(sections_html, meta, exclude_bge):
         ("s5","5. Repeat Sequencing"),
         ("s6","6. Missing Specimens"),
         ("s7","7. BOLD Quality Flags"),
-        ("s9","9. BOLD Sequence Concordance"),
-        ("s10","10. Repeat Batch Families"),
-        ("s11","11. Positive Controls"),
-        ("s12","12. Actions Required"),
+        ("s8","8. BOLD Sequence Concordance"),
+        ("s9","9. Repeat Batch Families"),
+        ("s10","10. Positive Controls"),
+        ("s11","11. Actions Required"),
     ]
     nav_html = '<span class="nav-section">Sections</span>'
     nav_html += "".join(f'<a href="#{id_}">{label}</a>' for id_,label in nav_items)
