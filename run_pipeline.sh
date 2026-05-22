@@ -34,6 +34,7 @@ done
 RUN_TS=$(date +%Y%m%d_%H%M%S)
 RUN_DIR="${RESULTS_DIR}/${RUN_TS}"
 mkdir -p "$RUN_DIR"
+export BIOSCAN_RUN_DIR="$RUN_DIR"
 
 echo "============================================================"
 echo "BIOSCAN Pipeline Run"
@@ -50,7 +51,7 @@ run_step() {
     local script=$1
     shift
     echo ">>> $script $@"
-    python3 "$script" --run-dir "$RUN_DIR" "$@"
+    python3 "$script" "$@"
     echo ""
 }
 
@@ -72,9 +73,11 @@ else
     echo ""
 fi
 
-# Batch family sequence comparison (once in a while — run by default, skip with flag)
+# Batch family sequence comparison — uses --output-dir not --run-dir
 if [ "$SKIP_BATCH_FAMILY" -eq 0 ]; then
-    run_step batch_family_sequence_comparison.py --verbose
+    echo ">>> batch_family_sequence_comparison.py --verbose --output-dir $RUN_DIR"
+    python3 batch_family_sequence_comparison.py --verbose --output-dir "$RUN_DIR"
+    echo ""
 else
     echo ">>> Skipping batch_family_sequence_comparison.py"
     echo ""
@@ -89,7 +92,12 @@ fi
 
 run_step positive_control_analysis.py $BGE_FLAG
 
-run_step generate_html_report.py    $BGE_FLAG
+# generate_html_report uses --output (full path) not --run-dir
+HTML_OUT="$RUN_DIR/bioscan_report_$(date +%Y%m%d).html"
+echo ">>> generate_html_report.py $BGE_FLAG --output $HTML_OUT"
+python3 generate_html_report.py $BGE_FLAG --output "$HTML_OUT"
+echo ""
+
 run_step generate_summary_report.py $BGE_FLAG
 
 echo "============================================================"
