@@ -27,10 +27,10 @@ All input data is read directly from lustre — nothing is copied or modified.
 **Why we use it:** The primary source for QC decisions per specimen. `filtered_metadata` is used for pass rate calculations. `qc_portal` is used for the specimen-level repeat analysis as it includes FAILED specimens. The FASTA files are used for sequence concordance checks against BOLD.
 
 ### BOLD workbench exports
-**Path:** `/lustre/scratch126/tol/teams/lawniczak/users/lp20/bioscan_plate_checker_results/bold_workbench_YYYY.xlsx`
-**Source:** Downloaded manually from the BOLD workbench (https://bench.boldsystems.org) filtered by upload year. Maximum 99,999 records per download — split into `bold_workbench_YYYYa.xlsx` / `bold_workbench_YYYYb.xlsx` for high-volume years. Use the `Lab Sheet` tab only.
-**Contains:** One row per specimen on BOLD. Includes `Sample ID` (specimen ID), `BIN`, `Stop Codon`, `Contamination`, `Flagged Record`, `Barcode Compliant` flags. Does not contain the actual sequence.
-**Why we use it:** The only source for BOLD quality flags. Sequences flagged for stop codons or contamination do not receive BIN assignments — this file tells us which specimens are affected and why. Combined with the portal dump (which has the actual sequences), we can identify whether the QC pipeline has since produced a better sequence that should replace the flagged BOLD record.
+**Path:** `/lustre/scratch126/tol/teams/lawniczak/users/lp20/bioscan_plate_checker_results/bold_workbench_flagged_YYYYMMDD.xlsx`
+**Source:** Downloaded manually from the BOLD workbench (https://bench.boldsystems.org), filtered to flagged records only (Stop Codon / Contamination / Flagged Record). Re-exported several times a year — each export is saved with its download date in the filename, and multiple files per year are expected. Use the `Lab Sheet` tab only.
+**Contains:** One row per flagged specimen on BOLD. Includes `Sample ID` (specimen ID), `BIN`, `Stop Codon`, `Contamination`, `Flagged Record` flags. Does not contain the actual sequence.
+**Why we use it:** The only source for BOLD quality flags. Sequences flagged for stop codons or contamination do not receive BIN assignments — this file tells us which specimens are affected and why. Combined with the portal dump (which has the actual sequences), we can identify whether the QC pipeline has since produced a better sequence that should replace the flagged BOLD record. Population-wide BIN coverage now comes from `bold_summary_from_portal.py` instead, and barcode compliance is no longer tracked — this export is flagged-only, so it's no longer used for whole-population stats.
 
 ---
 
@@ -111,13 +111,13 @@ Files are dated `YYYYMMDD`.
 
 | File | Type | Level | Description |
 |---|---|---|---|
-| `bold_workbench_combined.csv` | CSV | Cache | Combined workbench records from all annual files. Auto-generated on first run. Delete and rerun with `--rebuild-cache` if source files change. |
-| `bold_workbench_report_YYYYMMDD.txt` | Text | Summary | Quality flag counts (stop codon, contamination, flagged record, BIN compliance) by partner, plus sequence comparison results. |
+| `bold_workbench_combined.csv` | CSV | Cache | Combined records from all dated flagged-only export files. Auto-generated on first run. Delete and rerun with `--rebuild-cache` if source files change. |
+| `bold_workbench_report_YYYYMMDD.txt` | Text | Summary | Quality flag counts (stop codon, contamination, flagged record) by partner, plus sequence comparison results. |
 | `bold_workbench_plates_YYYYMMDD.csv` | CSV | Plate | Plate-level counts of each quality flag type. |
 | `bold_flagged_comparison_YYYYMMDD.csv` | CSV | Specimen | For every flagged specimen, shows whether the BOLD sequence is IDENTICAL or DIFFERENT to the QC-passed FASTA. |
 | `bold_needs_resubmission_YYYYMMDD.csv` | CSV | Specimen | **Key actionable output.** Specimens with no BIN, a quality flag, and a DIFFERENT (better) sequence in QC. These should be resubmitted to BOLD to obtain a BIN. Includes partner, flag type, and upload date. |
 | `bold_flagged_no_alternative_YYYYMMDD.csv` | CSV | Specimen | Flagged specimens where the QC sequence is IDENTICAL to BOLD — flag is genuine, no better sequence available. Requires manual expert assessment. |
-| `bold_full_concordance_YYYYMMDD.csv` | CSV | Specimen | **Ad hoc only** (`--full-concordance`). Every sequence on BOLD compared against QC FASTA. Confirms 100% concordance or flags drift. |
+| `bold_full_concordance_YYYYMMDD.csv` | CSV | Specimen | **Ad hoc only** (`--full-concordance`). Every BOLD-uploaded specimen (sourced directly from the portal dump, independent of the workbench export) compared against QC FASTA. Confirms 100% concordance or flags drift. |
 
 ---
 
@@ -146,7 +146,7 @@ Files are dated `YYYYMMDD`.
 
 ---
 
-### From `bold_check.R` — quarterly BOLD sanity check
+### From `bold_check.R` — BOLDconnectR portal/BOLD sync check
 
 | File | Type | Level | Description |
 |---|---|---|---|
@@ -190,7 +190,7 @@ Edit `PORTAL_DUMP_TSV` in `config.py` to point to the latest `sts_manifests_YYYY
 python3 read_portal_dump.py
 ```
 
-### 5. API key for BOLD (quarterly sanity check only)
+### 5. API key for BOLD (BOLDconnectR sync check)
 
 ```bash
 cp .env.example .env
@@ -217,6 +217,10 @@ python3 plate_summary_all.py --partner ALL
 # 5. BOLD upload and BIN URI summary
 python3 bold_summary_from_portal.py --partner ALL
 
+# 5a. BOLDconnectR portal/BOLD sync check — queries the live BOLD API
+#     directly, so it runs every time now (previously occasional)
+bsub < run_bold_check.sh
+
 # 6. Repeat analysis — plate level
 python3 repeat_analysis.py --partner ALL
 
@@ -226,15 +230,9 @@ python3 repeat_analysis_specimens.py --partner ALL
 # 8. Missing specimen analysis (~10 mins)
 python3 missing_specimen_analysis.py --partner ALL
 
-# 9. BOLD workbench analysis (when new workbench files downloaded)
+# 9. BOLD workbench analysis (when new flagged workbench files downloaded)
 python3 bold_workbench_analysis.py --partner ALL --rebuild-cache
 python3 bold_sequence_concordance.py --exclude-bge
-```
-
-### Quarterly BOLD sanity check
-
-```bash
-bsub < run_bold_check.sh
 ```
 
 ---
@@ -392,19 +390,15 @@ python3 bold_sequence_concordance.py --verbose           # per-batch progress
 ---
 
 ### `bold_workbench_analysis.py`
-Analyses BOLD workbench exports to assess quality flags and compare sequences.
+Analyses BOLD workbench exports (flagged records only) to assess quality flags and compare sequences.
 
 **Input files** (place in results directory):
 ```
-bold_workbench_2021.xlsx
-bold_workbench_2022.xlsx
-bold_workbench_2023.xlsx
-bold_workbench_2024a.xlsx   ← split if >99,999 records
-bold_workbench_2024b.xlsx
-bold_workbench_2025a.xlsx
-bold_workbench_2025b.xlsx
-bold_workbench_2026.xlsx
+bold_workbench_flagged_20260115.xlsx
+bold_workbench_flagged_20260402.xlsx
+bold_workbench_flagged_20260618.xlsx   ← re-exported as needed, several times a year
 ```
+Newest file (by the date in the filename) wins per specimen when files overlap.
 
 **Sequence comparison results:**
 - `IDENTICAL` — same sequence in BOLD and QC → flag is genuine
@@ -415,16 +409,23 @@ bold_workbench_2026.xlsx
 
 ```bash
 python3 bold_workbench_analysis.py --partner ALL          # routine
-python3 bold_workbench_analysis.py --full-concordance     # ad hoc
-python3 bold_workbench_analysis.py --rebuild-cache        # after new files
+python3 bold_workbench_analysis.py --full-concordance     # ad hoc — sourced from portal dump, works with zero workbench files
+python3 bold_workbench_analysis.py --rebuild-cache        # after new dated files added
 python3 bold_workbench_analysis.py --skip-sequence-comparison
 ```
 
 ---
 
 ### `bold_check.R` + `run_bold_check.sh`
-Quarterly BOLDconnectR sanity check. Confirms portal and BOLD are in sync.
+BOLDconnectR portal/BOLD sync check. Queries the live BOLD API directly (no
+manual export needed), so it now runs as part of every routine pipeline run
+rather than on a separate occasional cadence. Confirms portal and BOLD are
+in sync, and flags specimens with a sequence on BOLD but no BIN URI.
 Portal/BOLD concordance confirmed 100% as of April 2026.
+
+`PORTAL_DUMP` is read from the `PORTAL_DUMP_TSV` environment variable, which
+`run_bold_check.sh` sets from `config.py` — keeping a single source of truth
+for the portal dump path instead of a second hardcoded copy.
 
 ```bash
 bsub < run_bold_check.sh

@@ -10,10 +10,14 @@
 . /usr/share/modules/init/bash
 module load HGI/softpack/users/aw43/BOLDconnectR_bioscan/2
 
+cd ~/bioscan_plate_checker
+
 # Load API key from .env file (never hardcode)
 if [ -f ~/bioscan_plate_checker/.env ]; then
     export $(cat ~/bioscan_plate_checker/.env | xargs)
 fi
 
-cd ~/bioscan_plate_checker
+# Single source of truth for the portal dump path lives in config.py
+export PORTAL_DUMP_TSV=$(python3 -c "import config; print(config.PORTAL_DUMP_TSV)")
+
 Rscript bold_check.R "$@"
