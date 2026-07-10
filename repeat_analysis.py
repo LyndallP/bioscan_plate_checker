@@ -94,7 +94,7 @@ def run_repeat_analysis(qc_dir=None, partner=None,
 
     print("Loading QC data per batch...")
     df_qc = get_plate_qc_per_batch(qc_dir,
-                                    resolve_batches(qc_dir)[0],
+                                    resolve_batches(qc_dir, include_special=True)[0],
                                     partner=partner,
                                     verbose=verbose)
 

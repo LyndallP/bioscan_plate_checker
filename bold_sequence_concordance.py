@@ -34,7 +34,7 @@ import pandas as pd
 from collections import defaultdict
 
 import config
-from utils import is_bge_plate, resolve_run_dir
+from utils import is_bge_plate, resolve_run_dir, resolve_batches
 
 QC_DIR         = '/lustre/scratch126/tol/teams/lawniczak/projects/bioscan/bioscan_qc/qc_reports_rerun_Feb2026'
 _FASTA_PATTERN = 'BOLD_filtered_sequences_batch*.fasta'
@@ -89,15 +89,16 @@ def extract_partner_from_rack(rack_id):
 
 
 def find_fasta_files(qc_dir):
-    pattern = os.path.join(qc_dir, '**', _FASTA_PATTERN)
-    files = glob.glob(pattern, recursive=True)
+    """Return {batch_name: fasta_path} for all resolved batches including special
+    (RnD, repeat sub-batches). Uses resolve_batches so the logic stays consistent
+    with the rest of the pipeline — critical once repeat-batch sequences are on BOLD."""
+    resolved, _ = resolve_batches(qc_dir, include_special=True)
     result = {}
-    skip = {'merged', 'rnd', 'r&d'}
-    for f in sorted(files):
-        batch = os.path.basename(os.path.dirname(f))
-        if any(s in batch.lower() for s in skip):
-            continue
-        result[batch] = f
+    for batch in resolved:
+        batch_path = os.path.join(qc_dir, batch)
+        files = glob.glob(os.path.join(batch_path, _FASTA_PATTERN))
+        if files:
+            result[batch] = files[0]
     return result
 
 

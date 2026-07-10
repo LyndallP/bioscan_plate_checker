@@ -217,7 +217,7 @@ def load_qc_fasta_sequences(qc_dir=None, partner=None, verbose=False):
     if qc_dir is None:
         qc_dir = config.QC_DIR
 
-    resolved, _ = resolve_batches(qc_dir)
+    resolved, _ = resolve_batches(qc_dir, include_special=True)
     sequences = {}
 
     for batch_folder in resolved:

@@ -34,6 +34,7 @@ done
 RUN_TS=$(date +%Y%m%d_%H%M%S)
 RUN_DIR="${RESULTS_DIR}/${RUN_TS}"
 mkdir -p "$RUN_DIR"
+export BIOSCAN_RUN_DIR="$RUN_DIR"
 
 echo "============================================================"
 echo "BIOSCAN Pipeline Run"
@@ -50,30 +51,33 @@ run_step() {
     local script=$1
     shift
     echo ">>> $script $@"
-    python3 "$script" --run-dir "$RUN_DIR" "$@"
+    python3 "$script" "$@"
     echo ""
 }
 
 # ── Steps ─────────────────────────────────────────────────────────────────────
-run_step plate_status_report.py        --partner ALL $BGE_FLAG
-run_step generate_pipeline_report.py   $BGE_FLAG
+# Note: --exclude-bge is only passed to scripts that accept it.
+run_step plate_status_report.py        --partner ALL
+run_step generate_pipeline_report.py
 run_step bold_summary_from_portal.py   --partner ALL $BGE_FLAG
 run_step plate_summary_all.py          --partner ALL $BGE_FLAG --verbose
 run_step qc_bold_mismatch_portal.py    $BGE_FLAG
-run_step repeat_analysis.py            --partner ALL $BGE_FLAG
-run_step repeat_analysis_specimens.py  --partner ALL $BGE_FLAG
-run_step missing_specimen_analysis.py  --partner ALL $BGE_FLAG
+run_step repeat_analysis.py            --partner ALL
+run_step repeat_analysis_specimens.py  --partner ALL
+run_step missing_specimen_analysis.py  --partner ALL
 
 if [ "$SKIP_WORKBENCH" -eq 0 ]; then
-    run_step bold_workbench_analysis.py --partner ALL --rebuild-cache $BGE_FLAG
+    run_step bold_workbench_analysis.py --partner ALL --rebuild-cache
 else
     echo ">>> Skipping bold_workbench_analysis.py"
     echo ""
 fi
 
-# Batch family sequence comparison (once in a while — run by default, skip with flag)
+# Batch family sequence comparison — uses --output-dir not --run-dir
 if [ "$SKIP_BATCH_FAMILY" -eq 0 ]; then
-    run_step batch_family_sequence_comparison.py --verbose
+    echo ">>> batch_family_sequence_comparison.py --verbose --output-dir $RUN_DIR"
+    python3 batch_family_sequence_comparison.py --verbose --output-dir "$RUN_DIR"
+    echo ""
 else
     echo ">>> Skipping batch_family_sequence_comparison.py"
     echo ""
@@ -86,7 +90,14 @@ else
     echo ""
 fi
 
-run_step generate_html_report.py   $BGE_FLAG
+run_step positive_control_analysis.py $BGE_FLAG
+
+# generate_html_report uses --output (full path) not --run-dir
+HTML_OUT="$RUN_DIR/bioscan_report_$(date +%Y%m%d).html"
+echo ">>> generate_html_report.py $BGE_FLAG --output $HTML_OUT"
+python3 generate_html_report.py $BGE_FLAG --output "$HTML_OUT"
+echo ""
+
 run_step generate_summary_report.py $BGE_FLAG
 
 echo "============================================================"

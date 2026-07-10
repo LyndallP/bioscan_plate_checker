@@ -339,24 +339,25 @@ def load_all_qc_decisions(qc_dir, qc_resolved, verbose=False, exclude_bge=False)
     and category numbers from filtered_metadata (PASS/ON_HOLD only but
     has reliable category numbers in all batch formats).
 
-    IMPORTANT: We scan ALL QC batch folders (not just deduped qc_resolved)
-    for the same reason as load_umi_data - plain batch folders (e.g. batch27)
-    may contain QC decisions for plates that don't appear in the split folders
+    IMPORTANT: We scan ALL QC batch folders including special ones (batchRnD*,
+    batch35_repeat_batch*, batch39_rep_*) so that passes from repeat batch members
+    are counted. Plain batch folders (e.g. batch27) are also included because they
+    may contain QC decisions for plates not in the split folders
     (e.g. BGEP plates 111-200 in batch27 plain vs other partners in batch27_1-4).
     Returns dict: specimen_id -> list of {batch, decision, category}
     """
     all_decisions = defaultdict(list)
 
     import os as _os
+    # Scan all batch folders including special (RnD, repeat sub-batches) so that
+    # passes from repeat batch members are counted. Still exclude _merged (failed
+    # post-processing), PCR1_volume_test (not production), and EXCLUDED folders.
     all_qc_batches = sorted([
         d for d in _os.listdir(qc_dir)
         if _os.path.isdir(_os.path.join(qc_dir, d))
         and d.startswith('batch')
         and 'EXCLUDED' not in d
-        and 'RnD' not in d
         and 'PCR1_volume' not in d
-        and '_repeat_' not in d
-        and '_rep_' not in d
         and '_merged' not in d
     ])
 

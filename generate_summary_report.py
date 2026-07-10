@@ -154,15 +154,15 @@ def section_missing_sequencing(plate_status, exclude_bge):
     today = pd.Timestamp.now()
     not_seq['days_waiting'] = (today - not_seq['submit_date']).dt.days
 
-    old = not_seq[not_seq['days_waiting'] >= 180].sort_values('days_waiting', ascending=False)
-    recent = not_seq[not_seq['days_waiting'] < 180]
+    old = not_seq[not_seq['days_waiting'] >= 90].sort_values('days_waiting', ascending=False)
+    recent = not_seq[not_seq['days_waiting'] < 90]
 
     lines = [
         "## 2. Plates Missing from Sequencing",
         "",
         f"**{fmt(len(not_seq))} plates submitted but not yet sequenced**",
         "",
-        f"- {fmt(len(old))} submitted >180 days ago — investigate immediately",
+        f"- {fmt(len(old))} submitted >90 days ago — investigate immediately",
         f"- {fmt(len(recent))} recently submitted — likely in queue",
         "",
     ]
@@ -185,7 +185,7 @@ def section_missing_sequencing(plate_status, exclude_bge):
     # Partner summary
     by_partner = not_seq.groupby('partner').agg(
         n=('plate_id', 'count'),
-        old=('days_waiting', lambda x: (x >= 180).sum())
+        old=('days_waiting', lambda x: (x >= 90).sum())
     ).reset_index().sort_values('n', ascending=False)
 
     lines += [
@@ -195,8 +195,8 @@ def section_missing_sequencing(plate_status, exclude_bge):
         "|---|---|---|",
     ]
     for _, row in by_partner.iterrows():
-        note = f"All >{180} days old" if row['old'] == row['n'] else \
-               f"{int(row['old'])} plates >{180} days old" if row['old'] > 0 else \
+        note = f"All >90 days old" if row['old'] == row['n'] else \
+               f"{int(row['old'])} plates >90 days old" if row['old'] > 0 else \
                "Recently submitted"
         lines.append(f"| {row['partner']} | {int(row['n'])} | {note} |")
     lines.append("")
@@ -217,7 +217,7 @@ def section_not_on_bold(plate_status, exclude_bge):
     not_bold['days'] = (today - not_bold['submit_date']).dt.days
     not_bold['year'] = not_bold['submit_date'].dt.year
 
-    old = not_bold[not_bold['days'] >= 180]
+    old = not_bold[not_bold['days'] >= 90]
     n_2026 = (not_bold['year'] >= 2026).sum()
     n_2025 = (not_bold['year'] == 2025).sum()
 
@@ -231,7 +231,7 @@ def section_not_on_bold(plate_status, exclude_bge):
         "",
         f"- {fmt(n_2026)} plates submitted in 2026 — too recent to expect on BOLD yet",
         f"- {fmt(n_2025)} plates submitted in 2025 — mostly normal upload lag",
-        f"- {fmt(len(old))} plates submitted >180 days ago — need chasing immediately",
+        f"- {fmt(len(old))} plates submitted >90 days ago — need chasing immediately",
         "",
         "**All partners with plates not on BOLD:**",
         "",
@@ -244,7 +244,7 @@ def section_not_on_bold(plate_status, exclude_bge):
 
     if not old_by_partner.empty:
         lines += [
-            "**Partners with overdue plates (>180 days, not on BOLD):**",
+            "**Partners with overdue plates (>90 days, not on BOLD):**",
             "",
             "| Partner | Overdue plates |",
             "|---|---|",
@@ -682,7 +682,7 @@ def section_actions(plate_status, bold_needs_resub, bold_flagged_comp,
     not_seq = df[df['missing_at'] == 'mbrave'].copy() if 'missing_at' in df.columns else pd.DataFrame()
     if not not_seq.empty:
         not_seq['submit_date'] = pd.to_datetime(not_seq['submit_date'], errors='coerce')
-        old_not_seq = (pd.Timestamp.now() - not_seq['submit_date']).dt.days >= 180
+        old_not_seq = (pd.Timestamp.now() - not_seq['submit_date']).dt.days >= 90
         n_old_not_seq = old_not_seq.sum()
     else:
         n_old_not_seq = 0
@@ -697,8 +697,8 @@ def section_actions(plate_status, bold_needs_resub, bold_flagged_comp,
         "",
         "### 🔴 HIGH PRIORITY — Must be resolved before data freeze",
         "",
-        f"**1. Investigate plates with no sequencing data after >180 days**  ",
-        f"Plates submitted over 180 days ago with no mBRAVE data: **{fmt(n_old_not_seq)} plates**.  ",
+        f"**1. Investigate plates with no sequencing data after >90 days**  ",
+        f"Plates submitted over 90 days ago with no mBRAVE data: **{fmt(n_old_not_seq)} plates**.  ",
         "FRBX and FACE are the most critical — submitted 2023, still unsequenced.  ",
         "_Reference: `missing_plates_ALL_YYYYMMDD.txt`_",
         "",
@@ -712,7 +712,7 @@ def section_actions(plate_status, bold_needs_resub, bold_flagged_comp,
         "_Reference: `bold_flagged_comparison_YYYYMMDD.csv` (filter `sequence_status == QC_ONLY`)_",
         "",
         f"**4. Upload {fmt(n_not_bold)} QC-passed plates to BOLD**  ",
-        "Prioritise plates submitted >180 days ago. BGE partners tracked separately.  ",
+        "Prioritise plates submitted >90 days ago. BGE partners tracked separately.  ",
         "_Reference: `bioscan_plate_status_ALL_YYYYMMDD.csv`_",
         "",
         "**5. Investigate BCLT — all specimens on BOLD, all flagged, zero BINs**  ",
