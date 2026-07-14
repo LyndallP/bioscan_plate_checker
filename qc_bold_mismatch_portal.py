@@ -42,11 +42,6 @@ _PARTNER_COL     = 'bold_bold_recordset_code_arr'
 _SUBMIT_COL      = 'sts_submit_date'
 
 
-def find_latest_dump(results_dir):
-    candidates = sorted(glob.glob(os.path.join(results_dir, 'sts_manifests_*.tsv')))
-    return candidates[-1] if candidates else None
-
-
 def clean_partner(val):
     """Extract BIOSCAN 4-letter code from portal recordset field.
     Field is e.g. "['FRBX', 'DS-CECIDOEU']" - ignore DS- dataset codes."""
@@ -81,7 +76,7 @@ def main():
         description='Find QC-FAILED specimens that have sequences on BOLD'
     )
     parser.add_argument('--input', default=None,
-        help='Path to portal dump TSV (default: most recent in RESULTS_DIR)')
+        help='Path to portal dump TSV (default: config.py PORTAL_DUMP_TSV)')
     parser.add_argument('--exclude-bge', action='store_true',
         help='Exclude BGE partners (BGEP, BGEG, BGKU, BGPT)')
     parser.add_argument('--output', default=None,
@@ -93,10 +88,12 @@ def main():
     run_dir = resolve_run_dir(args.run_dir)
     run_ts  = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
 
-    # Find dump
-    dump_path = args.input or find_latest_dump(config.RESULTS_DIR)
+    # Find dump — defaults to the pipeline's single source of truth in config.py,
+    # same as plate_status_report.py / bold_summary_from_portal.py / bold_check.R
+    dump_path = args.input or config.PORTAL_DUMP_TSV
     if not dump_path or not os.path.exists(dump_path):
-        print("ERROR: No portal dump found. Run read_portal_dump.py --fetch first.")
+        print(f"ERROR: Portal dump not found: {dump_path}\n"
+              f"Check PORTAL_DUMP_TSV in config.py, or pass --input explicitly.")
         return
 
     print(f"Reading portal dump: {os.path.basename(dump_path)}")
