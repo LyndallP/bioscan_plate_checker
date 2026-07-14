@@ -191,15 +191,21 @@ def main():
     # Cross-reference with plate_summary_all — a specimen may appear FAILED
     # in the portal QC field (latest batch) but have PASSED in an earlier batch.
     print(f"\nCross-referencing with plate_summary_all...")
-    ps_path = None
-    for pat in [
-        os.path.join(config.RESULTS_DIR, 'plate_summary_all_ALL_*.csv'),
-        os.path.join(config.RESULTS_DIR, '*', 'plate_summary_all_ALL_*.csv'),
-    ]:
-        candidates = sorted(glob.glob(pat))
-        if candidates:
-            ps_path = max(candidates, key=os.path.getmtime)
-            break
+    # Prefer this run's own output (same run_dir this script writes to); fall
+    # back to the most recent copy anywhere in RESULTS_DIR otherwise. Previously
+    # this checked RESULTS_DIR root first and stopped there if anything matched
+    # at all, regardless of age — a stale root-level file could shadow a much
+    # newer one sitting in the current run's subfolder.
+    run_candidates = sorted(glob.glob(
+        os.path.join(run_dir, 'plate_summary_all_ALL_*.csv')))
+    if run_candidates:
+        ps_path = max(run_candidates, key=os.path.getmtime)
+    else:
+        all_candidates = (
+            glob.glob(os.path.join(config.RESULTS_DIR, 'plate_summary_all_ALL_*.csv')) +
+            glob.glob(os.path.join(config.RESULTS_DIR, '*', 'plate_summary_all_ALL_*.csv'))
+        )
+        ps_path = max(all_candidates, key=os.path.getmtime) if all_candidates else None
 
     if ps_path and len(mismatch) > 0:
         print(f"  Using: {os.path.basename(ps_path)}")
