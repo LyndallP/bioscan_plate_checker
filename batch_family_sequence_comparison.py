@@ -56,7 +56,6 @@ from collections import defaultdict
 import config
 
 TODAY   = datetime.datetime.now().strftime('%Y%m%d')
-QC_DIR  = '/lustre/scratch126/tol/teams/lawniczak/projects/bioscan/bioscan_qc/qc_reports_rerun_Feb2026'
 
 # ── Batch family definitions ──────────────────────────────────────────────────
 
@@ -201,7 +200,7 @@ def load_qc_data(batch_dir, batch_name):
     # Also try without subdirectory
     if not files:
         pattern2 = os.path.join(
-            QC_DIR, batch_name, 'filtered_metadata_*.csv')
+            config.QC_DIR, batch_name, 'filtered_metadata_*.csv')
         files = glob.glob(pattern2)
 
     if not files:
@@ -262,14 +261,10 @@ def load_qc_data(batch_dir, batch_name):
 
 # ── Portal dump loading ───────────────────────────────────────────────────────
 
-def load_bold_sequences(results_dir, verbose=False):
-    """Load BOLD sequences from most recent portal dump."""
-    candidates = sorted(glob.glob(os.path.join(results_dir, 'sts_manifests_*.tsv')))
-    if not candidates:
-        print("  WARNING: No portal dump found in results dir.")
-        return {}
-
-    dump_path = candidates[-1]
+def load_bold_sequences(dump_path=None, verbose=False):
+    """Load BOLD sequences from the portal dump."""
+    if dump_path is None:
+        dump_path = config.PORTAL_DUMP_TSV
     print(f"  Loading BOLD sequences from: {os.path.basename(dump_path)}")
 
     df = pd.read_csv(dump_path, sep='\t', dtype=str,
@@ -550,7 +545,7 @@ def main():
 
     # Load BOLD sequences
     print("Loading BOLD sequences from portal dump...")
-    bold_seqs = load_bold_sequences(config.RESULTS_DIR, verbose=True)
+    bold_seqs = load_bold_sequences(verbose=True)
     print()
 
     # Select families to run
@@ -569,7 +564,7 @@ def main():
     for family_name, family_def in families.items():
         print(f"Analysing {family_name}...")
         batch_rows, summary_rows = analyse_family(
-            family_name, family_def, bold_seqs, QC_DIR,
+            family_name, family_def, bold_seqs, config.QC_DIR,
             verbose=args.verbose
         )
         all_batch_rows.extend(batch_rows)
