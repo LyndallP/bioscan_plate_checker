@@ -506,7 +506,6 @@ def load_all(results_dir, exclude_bge):
     bold_needs_resub   = latest('bold_needs_resubmission_*.csv')
     bold_flagged_no_alt= latest('bold_flagged_no_alternative_*.csv')
     bold_flagged_comp  = latest('bold_flagged_comparison_*.csv')
-    bold_wb_plates     = latest('bold_workbench_plates_*.csv')
     bold_report_path   = _latest('bold_workbench_report_*.txt', results_dir)
     bold_concordance   = latest('bold_sequence_concordance_ALL_*.csv')
     if bold_concordance.empty:
@@ -548,7 +547,6 @@ def load_all(results_dir, exclude_bge):
         bold_needs_resub   = _drop_bge_by_plate(bold_needs_resub)
         bold_flagged_no_alt= _drop_bge_by_plate(bold_flagged_no_alt)
         bold_flagged_comp  = _drop_bge_by_plate(bold_flagged_comp)
-        bold_wb_plates     = _drop_bge_by_plate(bold_wb_plates)
         bold_concordance   = _drop_bge_by_specimen(bold_concordance)
         batch_family_summ  = _drop_bge_by_specimen(batch_family_summ)
         repeat_transitions = _drop_bge_by_partner(repeat_transitions)
@@ -567,7 +565,6 @@ def load_all(results_dir, exclude_bge):
         bold_needs_resub=bold_needs_resub,
         bold_flagged_no_alt=bold_flagged_no_alt,
         bold_flagged_comp=bold_flagged_comp,
-        bold_wb_plates=bold_wb_plates,
         bold_report_path=bold_report_path,
         bold_concordance=bold_concordance,
         batch_family_summ=batch_family_summ,
@@ -1066,15 +1063,14 @@ def build_bold_flags(d):
     bold_comp        = d['bold_flagged_comp']
 
     # Parse workbench report — fixed regex
-    total_wb = with_bin = any_flag = stop_codon = contam = flagged_rec = 0
+    total_wb = any_flag = stop_codon = contam = flagged_rec = 0
     if bold_report_path and os.path.exists(bold_report_path):
         with open(bold_report_path) as f:
             txt = f.read()
         def _ex(label):
             m = re.search(rf'{re.escape(label)}\s*:\s*([\d,]+)', txt)
             return int(m.group(1).replace(',','')) if m else 0
-        total_wb   = _ex('Total specimens on BOLD')
-        with_bin   = _ex('With BIN URI')
+        total_wb   = _ex('Total flagged specimens loaded')
         stop_codon = _ex('Has stop codon flag')
         contam     = _ex('Has contamination flag')
         flagged_rec= _ex('Flagged record')
@@ -1094,9 +1090,7 @@ def build_bold_flags(d):
     total_comp = neither+qc_only+different+identical+bold_only
 
     stats = stat_grid([
-        ("On BOLD workbench", fmt(total_wb)),
-        ("With BIN URI", fmt(with_bin)),
-        ("Without BIN URI", fmt(total_wb-with_bin)),
+        ("Flagged specimens loaded", fmt(total_wb)),
         ("Any quality flag", badge(fmt(any_flag),"red")),
         ("Stop codon (flag only)", fmt(stop_codon)),
         ("Contamination", fmt(contam)),
@@ -1148,6 +1142,11 @@ def build_bold_flags(d):
                  "bold_workbench_combined.csv", "bold_flagged_comparison_YYYYMMDD.csv",
                  "bold_needs_resubmission_YYYYMMDD.csv", "bold_flagged_no_alternative_YYYYMMDD.csv"],
     )
+    bin_note = alert(
+        "ℹ The BOLD workbench export is flagged-only, so population-wide BIN coverage isn't "
+        "shown here — see the <code>bold_summary_from_portal.py</code> report instead.",
+        "info"
+    )
     stop_note = alert(
         "ℹ <strong>Stop codons</strong> are flagged by BOLD as a quality indicator but do "
         "<strong>not</strong> affect which sequence is selected by the QC pipeline. A stop "
@@ -1155,7 +1154,7 @@ def build_bold_flags(d):
         "and requires expert review rather than automated resubmission.",
         "info"
     )
-    content = (fbox + stats + stop_note +
+    content = (fbox + stats + bin_note + stop_note +
                "<h3>Sequence concordance for flagged specimens (QC FASTA vs BOLD)</h3>" +
                conc_tbl + resub_html + no_alt_html)
     return card("7. BOLD Quality Flags", content, "s7")
