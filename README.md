@@ -220,7 +220,7 @@ python3 generate_pipeline_report.py
 python3 plate_summary_all.py --partner ALL --exclude-bge
 
 # 5. BOLD upload and BIN URI summary
-python3 bold_summary_from_portal.py --partner ALL
+python3 bold_summary_from_portal.py --partner ALL --exclude-bge
 
 # 5a. BOLDconnectR portal/BOLD sync check — queries the live BOLD API directly.
 #     Runs in parallel with the rest of the pipeline: nothing downstream reads
@@ -330,7 +330,7 @@ python3 generate_pipeline_report.py --old-threshold-days 180
 BOLD upload and BIN URI summaries from the portal dump. No API or R required.
 
 ```bash
-python3 bold_summary_from_portal.py --partner ALL
+python3 bold_summary_from_portal.py --partner ALL --exclude-bge
 python3 bold_summary_from_portal.py --partner FACE
 ```
 
@@ -352,7 +352,7 @@ One row per plate showing the best QC result per specimen across all repeat sequ
 
 Produces two output files: PASS/ON_HOLD/FAIL summary, and categories 1–12 breakdown.
 
-The routine run passes `--exclude-bge` here, matching `bold_sequence_concordance.py` (step 9), `qc_bold_mismatch_portal.py` (step 10), and the two final report scripts (steps 12–13). Not every routine script supports or uses this flag — `bold_summary_from_portal.py` (step 5) accepts `--exclude-bge` but the routine run doesn't currently pass it, and several other steps (`plate_status_report.py`, `generate_pipeline_report.py`, `repeat_analysis*.py`, `missing_specimen_analysis.py`, `bold_workbench_analysis.py`, `batch_family_sequence_comparison.py`) don't support the flag at all — so BGE plates aren't uniformly excluded pipeline-wide; that's a separate, pre-existing gap this PR doesn't attempt to close.
+The routine run passes `--exclude-bge` here, matching `bold_summary_from_portal.py` (step 5), `bold_sequence_concordance.py` (step 9), `qc_bold_mismatch_portal.py` (step 10), and the two final report scripts (steps 12–13). Not every routine script supports this flag, though — `plate_status_report.py`, `generate_pipeline_report.py`, `repeat_analysis*.py`, `missing_specimen_analysis.py`, `bold_workbench_analysis.py`, and `batch_family_sequence_comparison.py` don't accept it at all — so BGE plates aren't uniformly excluded pipeline-wide; that's a separate, pre-existing gap this PR doesn't attempt to close.
 
 It defaults to off (`store_true`) here, same as every script that has this flag — don't flip that default, since `--exclude-bge` and `--partner BGEP` together always return zero rows (there's no override), and `--partner BGEP` is a supported use case below.
 
