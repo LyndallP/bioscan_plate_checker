@@ -30,13 +30,13 @@ import glob
 import json
 import os
 import re
+import sys
 import pandas as pd
 from collections import defaultdict
 
 import config
 from utils import is_bge_plate, resolve_run_dir, resolve_batches
 
-QC_DIR         = '/lustre/scratch126/tol/teams/lawniczak/projects/bioscan/bioscan_qc/qc_reports_rerun_Feb2026'
 _FASTA_PATTERN = 'BOLD_filtered_sequences_batch*.fasta'
 
 _SPECIMEN_COL    = 'sts_specimen.id'
@@ -129,11 +129,6 @@ def parse_fasta(filepath, partner_filter=None):
                   if k.startswith(partner_filter + '_') or
                   k.startswith('TOL-' + partner_filter + '-')}
     return result
-
-
-def find_latest_dump(results_dir):
-    candidates = sorted(glob.glob(os.path.join(results_dir, 'sts_manifests_*.tsv')))
-    return candidates[-1] if candidates else None
 
 
 def load_portal_sequences(dump_path, partner_filter=None, exclude_bge=False):
@@ -347,7 +342,7 @@ def main():
     parser.add_argument('--exclude-bge', action='store_true',
         help='Exclude BGE partners')
     parser.add_argument('--input', default=None,
-        help='Portal dump TSV path')
+        help='Portal dump TSV path (default: config.py PORTAL_DUMP_TSV)')
     parser.add_argument('--output', default=None,
         help='Output CSV path')
     parser.add_argument('--verbose', action='store_true')
@@ -358,10 +353,12 @@ def main():
     run_dir = resolve_run_dir(args.run_dir)
     run_ts  = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
 
-    dump_path = args.input or find_latest_dump(config.RESULTS_DIR)
+    # Defaults to the pipeline's single source of truth in config.py, same as
+    # plate_status_report.py / bold_summary_from_portal.py / bold_check.R
+    dump_path = args.input or config.PORTAL_DUMP_TSV
     if not dump_path or not os.path.exists(dump_path):
-        print("ERROR: No portal dump found.")
-        return
+        sys.exit(f"ERROR: Portal dump not found: {dump_path}\n"
+                 f"Check PORTAL_DUMP_TSV in config.py, or pass --input explicitly.")
 
     suffix = f"_{args.partner}" if args.partner else "_ALL"
     if args.output is None:
@@ -374,8 +371,8 @@ def main():
         print("No specimens found.")
         return
 
-    print(f"\nScanning FASTA files in: {QC_DIR}")
-    fasta_files = find_fasta_files(QC_DIR)
+    print(f"\nScanning FASTA files in: {config.QC_DIR}")
+    fasta_files = find_fasta_files(config.QC_DIR)
     print(f"  Found {len(fasta_files)} FASTA files")
 
     results = run_comparison(portal_df, fasta_files, verbose=args.verbose)
