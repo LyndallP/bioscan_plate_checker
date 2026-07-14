@@ -360,7 +360,9 @@ One row per plate showing the best QC result per specimen across all repeat sequ
 
 Produces two output files: PASS/ON_HOLD/FAIL summary, and categories 1–12 breakdown.
 
-The routine run always passes `--exclude-bge`, matching every other script in the pipeline (BGE plates are excluded from all other routine outputs). It defaults to off (`store_true`), same as everywhere else — don't flip that default, since `--exclude-bge` and `--partner BGEP` together always return zero rows (there's no override), and `--partner BGEP` is a supported use case below.
+The routine run passes `--exclude-bge` here, matching `bold_sequence_concordance.py` (step 9), `qc_bold_mismatch_portal.py` (step 10), and the two final report scripts (steps 12–13). Not every routine script supports or uses this flag — `bold_summary_from_portal.py` (step 5) accepts `--exclude-bge` but the routine run doesn't currently pass it, and several other steps (`plate_status_report.py`, `generate_pipeline_report.py`, `repeat_analysis*.py`, `missing_specimen_analysis.py`, `bold_workbench_analysis.py`, `batch_family_sequence_comparison.py`) don't support the flag at all — so BGE plates aren't uniformly excluded pipeline-wide; that's a separate, pre-existing gap this PR doesn't attempt to close.
+
+It defaults to off (`store_true`) here, same as every script that has this flag — don't flip that default, since `--exclude-bge` and `--partner BGEP` together always return zero rows (there's no override), and `--partner BGEP` is a supported use case below.
 
 ```bash
 python3 plate_summary_all.py --partner ALL --exclude-bge
