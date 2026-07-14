@@ -4,7 +4,8 @@ bold_workbench_analysis.py
 Two analyses in one script:
 
 ROUTINE (default):
-  Analyses flagged specimens from BOLD workbench exports.
+  Analyses flagged specimens from BOLD workbench exports (the export is now
+  flagged-only — see Input files below).
   For specimens with Stop Codon / Contamination / Flagged Record status,
   compares the sequence currently on BOLD (from portal dump bold_nuc) against
   the sequence that passed QC (from BOLD_filtered_sequences_batchN.fasta).
@@ -12,19 +13,28 @@ ROUTINE (default):
   IDENTICAL = same sequence -> flag is genuine, no update needed.
 
 AD HOC (--full-concordance):
-  Full sense check across ALL specimens on BOLD.
+  Full sense check across ALL BOLD-uploaded specimens, sourced directly from
+  the portal dump (bold_nuc present) — independent of the workbench export,
+  so this works even with zero workbench files present.
   Confirms every sequence on BOLD exactly matches the QC FASTA.
   Run occasionally to catch any drift between QC output and BOLD records.
 
 Input files (place in RESULTS_DIR):
-    bold_workbench_2021.csv  ┐
-    bold_workbench_2022.csv  │  BOLD workbench exports filtered by year
-    bold_workbench_2023.csv  │  Skip 2 header rows (header=2)
-    bold_workbench_2024.csv  │  Columns: Sample ID, BIN, Stop Codon,
-    bold_workbench_2025.csv  │  Contamination, Flagged Record, Barcode Compliant
-    bold_workbench_2026.csv  ┘
+    bold_workbench_flagged_20260115.xlsx  ┐
+    bold_workbench_flagged_20260402.csv   │  BOLD workbench exports, filtered
+    bold_workbench_flagged_20260618.xlsx  │  to flagged records only.
+                                           │  Re-exported several times a
+                                           ┘  year; newest file (by date in
+                                              filename) wins per specimen.
+    Skip 2 header rows (header=2). Columns: Sample ID, BIN, Stop Codon,
+    Contamination, Flagged Record.
 
-Portal dump (for BOLD sequences):
+    Population-wide stats are no longer computed here: BIN coverage comes
+    from bold_summary_from_portal.py, and barcode compliance has been
+    dropped (no source going forward).
+
+Portal dump (for BOLD sequences, and — in --full-concordance mode — the
+specimen list itself):
     config.PORTAL_DUMP_TSV -> bold_nuc column
 
 QC FASTA (for QC-passed sequences):
@@ -36,11 +46,11 @@ Usage:
     python3 bold_workbench_analysis.py
     python3 bold_workbench_analysis.py --partner FACE
 
-    # Ad hoc — full concordance check
+    # Ad hoc — full concordance check (works with zero workbench files)
     python3 bold_workbench_analysis.py --full-concordance
     python3 bold_workbench_analysis.py --full-concordance --partner BGEP
 
-    # Rebuild workbench cache if new year files added
+    # Rebuild workbench cache if new dated files added
     python3 bold_workbench_analysis.py --rebuild-cache
 
     # Skip sequence comparison (flag summary only)
@@ -61,8 +71,8 @@ from utils import resolve_batches, matches_partner, resolve_run_dir
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
-WORKBENCH_YEARS    = [2021, 2022, 2023, 2024, 2025, 2026]
-WORKBENCH_PATTERN  = "bold_workbench_{year}.csv"
+WORKBENCH_GLOB     = "bold_workbench_flagged_*"
+WORKBENCH_DATE_RE  = re.compile(r'bold_workbench_flagged_(\d{8})')
 COMBINED_CACHE     = "bold_workbench_combined.csv"
 BOLD_FASTA_PATTERN = "BOLD_filtered_sequences_batch*.fasta"
 
@@ -74,7 +84,6 @@ WB_BIN        = 'BIN'
 WB_STOP_CODON = 'Stop Codon'
 WB_CONTAM     = 'Contamination'
 WB_FLAGGED    = 'Flagged Record'
-WB_COMPLIANT  = 'Barcode Compliant'
 WB_SEQ_LEN    = 'COI-5P Seq. Length'
 
 # Portal dump columns
@@ -125,7 +134,7 @@ def compare_sequences(bold_seq, qc_seq):
 # ── Step 1: Load workbench ────────────────────────────────────────────────────
 
 def load_workbench(results_dir, rebuild_cache=False, verbose=False):
-    """Load and combine annual workbench files. Caches result."""
+    """Load and combine dated flagged-only workbench export files. Caches result."""
     cache_path = os.path.join(results_dir, COMBINED_CACHE)
 
     if os.path.exists(cache_path) and not rebuild_cache:
@@ -134,43 +143,42 @@ def load_workbench(results_dir, rebuild_cache=False, verbose=False):
         print(f"  {len(df)} records")
         return df
 
-    print("Reading annual workbench files...")
+    print("Reading flagged workbench export files...")
+    files = sorted(
+        glob.glob(os.path.join(results_dir, f"{WORKBENCH_GLOB}.xlsx")) +
+        glob.glob(os.path.join(results_dir, f"{WORKBENCH_GLOB}.csv"))
+    )
+
     dfs = []
-    for year in WORKBENCH_YEARS:
-        # Match bold_workbench_2024.xlsx/csv OR bold_workbench_2024a.xlsx/csv etc.
-        year_files = sorted(
-            glob.glob(os.path.join(results_dir, f"bold_workbench_{year}*.xlsx")) +
-            glob.glob(os.path.join(results_dir, f"bold_workbench_{year}*.csv"))
-        )
-        # Exclude the combined cache file
-        year_files = [f for f in year_files if 'combined' not in os.path.basename(f)]
-        if not year_files:
+    for path in files:
+        m = WORKBENCH_DATE_RE.search(os.path.basename(path))
+        if not m:
             if verbose:
-                print(f"  {year}: not found")
+                print(f"  {os.path.basename(path)}: skipped, no date in filename")
             continue
-        for path in year_files:
-            try:
-                ext = os.path.splitext(path)[1].lower()
-                if ext in ('.xlsx', '.xls'):
-                    df = pd.read_excel(path, sheet_name='Lab Sheet',
-                                       header=2, dtype=str)
-                else:
-                    df = pd.read_csv(path, header=2, dtype=str,
-                                     low_memory=False)
-                df['source_year'] = str(year)
-                dfs.append(df)
-                print(f"  {os.path.basename(path)}: {len(df)} records")
-            except Exception as e:
-                print(f"  {os.path.basename(path)}: ERROR — {e}")
+        source_date = m.group(1)
+        try:
+            ext = os.path.splitext(path)[1].lower()
+            if ext in ('.xlsx', '.xls'):
+                df = pd.read_excel(path, sheet_name='Lab Sheet',
+                                   header=2, dtype=str)
+            else:
+                df = pd.read_csv(path, header=2, dtype=str,
+                                 low_memory=False)
+            df['source_date'] = source_date
+            dfs.append(df)
+            print(f"  {os.path.basename(path)}: {len(df)} records")
+        except Exception as e:
+            print(f"  {os.path.basename(path)}: ERROR — {e}")
 
     if not dfs:
         raise FileNotFoundError(
             f"No workbench files found in {results_dir}\n"
-            f"Expected: bold_workbench_YYYY.csv or bold_workbench_YYYYa.csv etc."
+            f"Expected: bold_workbench_flagged_YYYYMMDD.xlsx or .csv"
         )
 
     combined = pd.concat(dfs, ignore_index=True)
-    combined = combined.sort_values('source_year', ascending=False)
+    combined = combined.sort_values('source_date', ascending=False)
     combined = combined.drop_duplicates(subset=WB_SAMPLE_ID, keep='first')
     combined = combined.reset_index(drop=True)
     print(f"  Combined: {len(combined)} unique specimens")
@@ -195,7 +203,8 @@ def enrich_workbench(wb_df, partner=None):
     wb_df['has_contam']    = wb_df[WB_CONTAM].notna() & \
                              (wb_df[WB_CONTAM].str.strip() != '')
     wb_df['is_flagged']    = wb_df[WB_FLAGGED].str.strip().str.lower() == 'yes'
-    wb_df['is_compliant']  = wb_df[WB_COMPLIANT].str.strip().str.lower() == 'yes'
+    # Every row in a flagged-only export already satisfies any_flag; this is
+    # now a no-op filter, kept for compatibility if a mixed export is ever loaded.
     wb_df['any_flag']      = wb_df['has_stop_codon'] | wb_df['has_contam'] | \
                              wb_df['is_flagged']
 
@@ -278,6 +287,36 @@ def load_portal_sequences(specimen_ids=None, dump_path=None):
     return result
 
 
+def load_portal_bold_specimens(dump_path=None, partner=None):
+    """
+    Load the full list of BOLD-uploaded specimens (bold_nuc present) directly
+    from the portal dump. Used by --full-concordance so that mode stays
+    decoupled from whatever the workbench export currently contains.
+    Returns DataFrame with columns: WB_SAMPLE_ID, plate_id, partner_code.
+    """
+    if dump_path is None:
+        dump_path = config.PORTAL_DUMP_TSV
+    print("  Loading BOLD-uploaded specimens from portal dump...")
+    df = pd.read_csv(dump_path, sep='\t', dtype=str,
+                     usecols=[PORTAL_SPECIMEN, PORTAL_BOLD_NUC],
+                     low_memory=False)
+    df = df[df[PORTAL_BOLD_NUC].notna() &
+            (df[PORTAL_BOLD_NUC] != 'None') &
+            (df[PORTAL_BOLD_NUC].str.len() > 10)].copy()
+    df = df.rename(columns={PORTAL_SPECIMEN: WB_SAMPLE_ID})
+    df['plate_id'] = df[WB_SAMPLE_ID].apply(
+        lambda s: re.sub(r'_[^_]+$', '', str(s)) if pd.notna(s) else None)
+    df['partner_code'] = df['plate_id'].apply(_extract_partner)
+
+    if partner and partner.upper() != 'ALL':
+        df = df[df['partner_code'] == partner.upper()]
+        print(f"  Filtered to partner '{partner}': {len(df)} records")
+
+    df = df.reset_index(drop=True)
+    print(f"  {len(df)} BOLD-uploaded specimens from portal dump")
+    return df
+
+
 # ── Step 4: Run comparison ────────────────────────────────────────────────────
 
 def run_sequence_comparison(specimens_df, qc_seqs, portal_seqs, mode):
@@ -321,32 +360,26 @@ def generate_report(wb_df, flagged_comp, full_comp, partner, output_path):
     lines.append(f"Total workbench records: {len(wb_df)}")
 
     h("OVERALL QUALITY FLAGS")
-    lines.append(f"  Total specimens on BOLD   : {len(wb_df)}")
-    lines.append(f"  With BIN URI              : {wb_df['has_bin'].sum()}")
-    lines.append(f"  Without BIN URI           : {(~wb_df['has_bin']).sum()}")
+    lines.append(f"  Total flagged specimens loaded : {len(wb_df)}")
     lines.append(f"  Has stop codon flag       : {wb_df['has_stop_codon'].sum()}")
     lines.append(f"  Has contamination flag    : {wb_df['has_contam'].sum()}")
     lines.append(f"  Flagged record            : {wb_df['is_flagged'].sum()}")
-    lines.append(f"  Barcode compliant         : {wb_df['is_compliant'].sum()}")
     lines.append(f"  Any flag (stop/contam/flagged): {wb_df['any_flag'].sum()}")
 
     h("FLAGS BY PARTNER")
     pg = wb_df.groupby('partner_code').agg(
-        n_total      =('has_bin','count'),
-        n_with_bin   =('has_bin','sum'),
+        n_total      =('has_stop_codon','count'),
         n_stop_codon =('has_stop_codon','sum'),
         n_contam     =('has_contam','sum'),
         n_flagged    =('is_flagged','sum'),
-        n_compliant  =('is_compliant','sum'),
     ).reset_index().sort_values('n_flagged', ascending=False)
-    lines.append(f"  {'Partner':<8} {'Total':>7} {'BIN':>6} "
-                f"{'StopCdn':>8} {'Contam':>7} {'Flagged':>8} {'Compliant':>10}")
-    lines.append(f"  {'-'*8} {'-'*7} {'-'*6} {'-'*8} {'-'*7} {'-'*8} {'-'*10}")
+    lines.append(f"  {'Partner':<8} {'Total':>7} "
+                f"{'StopCdn':>8} {'Contam':>7} {'Flagged':>8}")
+    lines.append(f"  {'-'*8} {'-'*7} {'-'*8} {'-'*7} {'-'*8}")
     for _, row in pg.iterrows():
         lines.append(f"  {str(row['partner_code']):<8} {int(row['n_total']):>7} "
-                    f"{int(row['n_with_bin']):>6} {int(row['n_stop_codon']):>8} "
-                    f"{int(row['n_contam']):>7} {int(row['n_flagged']):>8} "
-                    f"{int(row['n_compliant']):>10}")
+                    f"{int(row['n_stop_codon']):>8} "
+                    f"{int(row['n_contam']):>7} {int(row['n_flagged']):>8}")
 
     if flagged_comp is not None and len(flagged_comp) > 0:
         h("ROUTINE CHECK — FLAGGED SPECIMENS: BOLD vs QC SEQUENCE")
@@ -365,7 +398,7 @@ def generate_report(wb_df, flagged_comp, full_comp, partner, output_path):
 
     if full_comp is not None and len(full_comp) > 0:
         h("AD HOC CHECK — FULL CONCORDANCE: ALL BOLD SEQUENCES vs QC FASTA")
-        lines.append("  Sense check: every sequence on BOLD vs QC FASTA output.")
+        lines.append("  Sense check: every BOLD-uploaded specimen (from portal dump) vs QC FASTA output.")
         lines.append("")
         total = len(full_comp)
         for status, count in full_comp['sequence_status'].value_counts().items():
@@ -394,11 +427,11 @@ def main():
     )
     parser.add_argument('--partner', default='ALL')
     parser.add_argument('--full-concordance', action='store_true',
-        help='Ad hoc: compare ALL specimens on BOLD vs QC FASTA (slow)')
+        help='Ad hoc: compare ALL BOLD-uploaded specimens (from portal dump) vs QC FASTA (slow)')
     parser.add_argument('--skip-sequence-comparison', action='store_true',
         help='Flag summary only — no sequence loading or comparison')
     parser.add_argument('--rebuild-cache', action='store_true',
-        help='Force re-read of annual workbench files')
+        help='Force re-read of dated flagged workbench export files')
     parser.add_argument('--verbose', action='store_true')
     parser.add_argument('--run-dir', default=None,
         help='Output directory (overrides BIOSCAN_RUN_DIR env var and auto-generate)')
@@ -407,14 +440,24 @@ def main():
     run_dir = resolve_run_dir(args.run_dir)
     run_ts  = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
 
-    # Load workbench
+    # Load workbench — not required for --full-concordance, which sources its
+    # specimen list from the portal dump instead.
     print("=" * 60)
-    print("Step 1: Loading BOLD workbench...")
+    print("Step 1: Loading BOLD workbench (flagged-only exports)...")
     print("=" * 60)
-    wb_df = load_workbench(config.RESULTS_DIR,
-                           rebuild_cache=args.rebuild_cache,
-                           verbose=args.verbose)
-    wb_df = enrich_workbench(wb_df, partner=args.partner)
+    try:
+        wb_df = load_workbench(config.RESULTS_DIR,
+                               rebuild_cache=args.rebuild_cache,
+                               verbose=args.verbose)
+        wb_df = enrich_workbench(wb_df, partner=args.partner)
+    except FileNotFoundError as e:
+        if not args.full_concordance:
+            raise
+        print(f"  {e}")
+        print("  No workbench files found — skipping routine flagged check.")
+        wb_df = pd.DataFrame(columns=[
+            WB_SAMPLE_ID, 'plate_id', 'partner_code', 'has_stop_codon',
+            'has_contam', 'is_flagged', 'any_flag', 'has_bin', WB_BIN])
 
     flagged_comp = None
     full_comp    = None
@@ -441,14 +484,16 @@ def main():
             flagged_comp.to_csv(flagged_path, index=False)
             print(f"  Flagged comparison saved: {flagged_path}")
 
-        # ── Ad hoc: full concordance ───────────────────────────────────────
+        # ── Ad hoc: full concordance — specimen list sourced from the portal
+        # dump directly, independent of the workbench export ───────────────
         if args.full_concordance:
-            print("\nStep 3b: Full concordance — loading ALL portal sequences...")
+            print("\nStep 3b: Full concordance — loading BOLD-uploaded specimens from portal dump...")
+            portal_specimens_df = load_portal_bold_specimens(partner=args.partner)
             all_portal_seqs = load_portal_sequences(
-                specimen_ids=set(wb_df[WB_SAMPLE_ID].dropna()))
-            print(f"Comparing {len(wb_df)} specimens...")
+                specimen_ids=set(portal_specimens_df[WB_SAMPLE_ID]))
+            print(f"Comparing {len(portal_specimens_df)} specimens...")
             full_comp = run_sequence_comparison(
-                wb_df, qc_seqs, all_portal_seqs, mode='full')
+                portal_specimens_df, qc_seqs, all_portal_seqs, mode='full')
             full_path = os.path.join(run_dir,
                 f'bold_full_concordance_{run_ts}.csv')
             full_comp.to_csv(full_path, index=False)
@@ -519,7 +564,6 @@ def main():
     plate_summary = wb_df.groupby('plate_id').agg(
         partner      =('partner_code','first'),
         n_specimens  =(WB_SAMPLE_ID,'count'),
-        n_with_bin   =('has_bin','sum'),
         n_stop_codon =('has_stop_codon','sum'),
         n_contam     =('has_contam','sum'),
         n_flagged    =('is_flagged','sum'),

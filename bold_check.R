@@ -32,7 +32,15 @@ partner    <- if ("--partner" %in% args) args[which(args == "--partner") + 1] el
 batch_size <- if ("--batch-size" %in% args) as.integer(args[which(args == "--batch-size") + 1]) else 500
 
 # ── Config ────────────────────────────────────────────────────────────────────
-PORTAL_DUMP <- "/lustre/scratch126/tol/teams/lawniczak/projects/bioscan/100k_paper/output/sts_manifests_20260408.tsv"
+# Portal dump path: single source of truth is config.py's PORTAL_DUMP_TSV.
+# Set by the wrapper script (run_bold_check.sh), which reads it from config.py
+# so this can never drift from the Python pipeline's copy.
+PORTAL_DUMP <- Sys.getenv("PORTAL_DUMP_TSV")
+if (nchar(PORTAL_DUMP) == 0) {
+  stop("PORTAL_DUMP_TSV environment variable not set.\n",
+       "Run via run_bold_check.sh, or export PORTAL_DUMP_TSV manually ",
+       "(see config.py's PORTAL_DUMP_TSV for the current path).")
+}
 RESULTS_DIR <- "/lustre/scratch126/tol/teams/lawniczak/users/lp20/bioscan_plate_checker_results"
 today       <- format(Sys.Date(), "%Y%m%d")
 
