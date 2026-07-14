@@ -241,16 +241,10 @@ python3 bold_workbench_analysis.py --partner ALL --rebuild-cache
 python3 bold_sequence_concordance.py --exclude-bge
 
 # 10. Data-integrity check: QC-FAILED specimens that still have a BOLD sequence.
-#     NOTE: sources the portal dump via a glob for sts_manifests_*.tsv in
-#     RESULTS_DIR, NOT PORTAL_DUMP_TSV from config.py — pass --input
-#     explicitly to be sure it matches the dump the rest of the pipeline used.
-python3 qc_bold_mismatch_portal.py --exclude-bge --input "$(python3 -c 'import config; print(config.PORTAL_DUMP_TSV)')"
+python3 qc_bold_mismatch_portal.py --exclude-bge
 
 # 11. Batch-family sequence comparison: cross-batch conflicts/updates for
-#     repeat-sequenced specimens. NOTE: reads filtered_metadata_batch*.csv via
-#     a QC_DIR constant hardcoded in the script itself (currently matches
-#     config.py's QC_DIR, but isn't wired to it — update both if the QC
-#     folder changes).
+#     repeat-sequenced specimens.
 python3 batch_family_sequence_comparison.py
 
 # 12. Comprehensive Markdown summary report — run last, since it pulls in
@@ -260,8 +254,6 @@ python3 generate_summary_report.py --exclude-bge
 # 13. Self-contained HTML version of the same report
 python3 generate_html_report.py --exclude-bge
 ```
-
-**Known data-source gaps (steps 10–11):** `qc_bold_mismatch_portal.py` and `batch_family_sequence_comparison.py` don't read from `config.py`'s `PORTAL_DUMP_TSV` / `QC_DIR` — see the notes above and their entries in [Script reference](#script-reference) below. Worth fixing at the source in a follow-up; documented here so they aren't silently trusted as fully in sync with the rest of the pipeline.
 
 ---
 
@@ -471,20 +463,17 @@ Runs in parallel with the rest of the routine run — nothing downstream reads `
 ---
 
 ### `qc_bold_mismatch_portal.py`
-Data-integrity check: flags specimens with QC result FAILED that still have a sequence on BOLD (should never happen). Cross-references against the latest `plate_summary_all_ALL_*.csv` if present, so it's best run after `plate_summary_all.py` (step 4).
-
-**Data source caveat:** without `--input`, this looks for the most recently-named `sts_manifests_*.tsv` inside `RESULTS_DIR` — it does **not** read `config.py`'s `PORTAL_DUMP_TSV`. Those are only the same file if a dump has recently been fetched into `RESULTS_DIR` via `read_portal_dump.py --fetch`. Pass `--input` explicitly to guarantee it matches the dump the rest of the pipeline is using.
+Data-integrity check: flags specimens with QC result FAILED that still have a sequence on BOLD (should never happen). Cross-references against the latest `plate_summary_all_ALL_*.csv` if present, so it's best run after `plate_summary_all.py` (step 4). Reads the portal dump from `config.py`'s `PORTAL_DUMP_TSV` by default; pass `--input` to point at a different dump instead.
 
 ```bash
-python3 qc_bold_mismatch_portal.py --exclude-bge --input "$(python3 -c 'import config; print(config.PORTAL_DUMP_TSV)')"
+python3 qc_bold_mismatch_portal.py --exclude-bge
+python3 qc_bold_mismatch_portal.py --input /path/to/sts_manifests_20260427.tsv
 ```
 
 ---
 
 ### `batch_family_sequence_comparison.py`
-Compares sequences across batch family members (repeat sequencing runs of the same specimen) to identify which run was the BOLD upload source, whether a later run has a QC-passed sequence not yet on BOLD, and genuine sequence conflicts across runs.
-
-**Data source caveat:** reads `filtered_metadata_batch*.csv` via a `QC_DIR` constant hardcoded at the top of the script itself, not `config.py`'s `QC_DIR` — the two currently hold the same value but aren't wired together, so update both if the QC folder ever changes.
+Compares sequences across batch family members (repeat sequencing runs of the same specimen) to identify which run was the BOLD upload source, whether a later run has a QC-passed sequence not yet on BOLD, and genuine sequence conflicts across runs. Reads `config.py`'s `QC_DIR` and `PORTAL_DUMP_TSV` directly.
 
 ```bash
 python3 batch_family_sequence_comparison.py
