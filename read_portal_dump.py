@@ -318,7 +318,7 @@ def main():
     parser.add_argument('--fetch', action='store_true',
         help='Fetch a fresh dump from the portal (takes ~2 hours, run in tmux)')
     parser.add_argument('--input', default=None,
-        help='Path to existing portal dump TSV (skip fetch)')
+        help='Path to existing portal dump TSV (skip fetch; default: config.py PORTAL_DUMP_TSV)')
     parser.add_argument('--output', default=None,
         help='Output CSV path (default: RESULTS_DIR/portal_plates_from_dump.csv)')
     args = parser.parse_args()
@@ -331,18 +331,16 @@ def main():
     elif args.input:
         dump_path = args.input
     else:
-        # Fall back to most recent sts_manifests file in results dir
-        import glob
-        candidates = sorted(glob.glob(
-            os.path.join(config.RESULTS_DIR, 'sts_manifests_*.tsv')
-        ))
-        if not candidates:
+        # Defaults to the pipeline's single source of truth in config.py, same
+        # as plate_status_report.py / bold_summary_from_portal.py / bold_check.R
+        dump_path = config.PORTAL_DUMP_TSV
+        if not dump_path or not os.path.exists(dump_path):
             parser.error(
-                'No portal dump found. Run with --fetch to download, '
-                'or provide --input /path/to/sts_manifests_YYYYMMDD.tsv'
+                f'Portal dump not found: {dump_path}\n'
+                f'Check PORTAL_DUMP_TSV in config.py, run with --fetch to download '
+                f'a new one, or provide --input /path/to/sts_manifests_YYYYMMDD.tsv'
             )
-        dump_path = candidates[-1]
-        print(f"Using most recent dump: {dump_path}")
+        print(f"Using dump from config.py PORTAL_DUMP_TSV: {dump_path}")
 
     # Step 2: build plate summary
     # --fetch runs synchronously so the file exists now
