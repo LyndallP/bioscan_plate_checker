@@ -554,17 +554,16 @@ def section_missing_specimens(missing_batch, missing_cats):
 
 
 def section_bold_flags(bold_report_path, bold_needs_resub, bold_flagged_no_alt,
-                       bold_flagged_comp, bold_workbench_plates):
+                       bold_flagged_comp):
     # Parse workbench totals from report file
-    total_wb = with_bin = any_flag = stop_codon = contam = flagged_rec = 0
+    total_wb = any_flag = stop_codon = contam = flagged_rec = 0
     if bold_report_path and os.path.exists(bold_report_path):
         with open(bold_report_path) as f:
             txt = f.read()
         def _extract(label):
             m = re.search(rf'{re.escape(label)}\s*:\s*([\d,]+)', txt)
             return int(m.group(1).replace(',','')) if m else 0
-        total_wb   = _extract('Total specimens on BOLD')
-        with_bin   = _extract('With BIN URI')
+        total_wb   = _extract('Total flagged specimens loaded')
         stop_codon = _extract('Has stop codon flag')
         contam     = _extract('Has contamination flag')
         flagged_rec= _extract('Flagged record')
@@ -595,27 +594,18 @@ def section_bold_flags(bold_report_path, bold_needs_resub, bold_flagged_no_alt,
         if col:
             no_alt_by_partner = bold_flagged_no_alt[col].value_counts()
 
-    # Top flagged plates
-    if not bold_workbench_plates.empty:
-        for col in ['n_any_flag','n_with_bin','n_stop_codon']:
-            bold_workbench_plates[col] = pd.to_numeric(
-                bold_workbench_plates[col], errors='coerce')
-        top_flagged = bold_workbench_plates.nlargest(10,'n_any_flag')
-    else:
-        top_flagged = pd.DataFrame()
-
     n_resub = len(bold_needs_resub)
     n_no_alt = len(bold_flagged_no_alt)
 
     lines = [
         "## 7. BOLD Quality Flags",
         "",
-        f"**{fmt(total_wb)} specimens on BOLD workbench**",
+        f"**{fmt(total_wb)} flagged specimens loaded** — the BOLD workbench export is "
+        f"flagged-only; population-wide BIN coverage is reported separately by "
+        f"`bold_summary_from_portal.py`.",
         "",
         "| Metric | Count |",
         "|---|---|",
-        f"| With BIN URI | {fmt(with_bin)} |",
-        f"| Without BIN URI | {fmt(total_wb - with_bin)} |",
         f"| Any quality flag | {fmt(any_flag)} ({pct(any_flag, total_wb)}) |",
         f"| Stop codon flag | {fmt(stop_codon)} |",
         f"| Contamination flag | {fmt(contam)} |",
@@ -663,7 +653,7 @@ def section_bold_flags(bold_report_path, bold_needs_resub, bold_flagged_no_alt,
 
 
 def section_actions(plate_status, bold_needs_resub, bold_flagged_comp,
-                    bold_workbench_plates, missing_cats, exclude_bge):
+                    missing_cats, exclude_bge):
     # Count QC_ONLY
     qc_only = 0
     if not bold_flagged_comp.empty and 'sequence_status' in bold_flagged_comp.columns:
@@ -794,7 +784,6 @@ def main():
     bold_needs_resub   = load('bold_needs_resubmission_*.csv')
     bold_flagged_no_alt= load('bold_flagged_no_alternative_*.csv')
     bold_flagged_comp  = load('bold_flagged_comparison_*.csv')
-    bold_wb_plates     = load('bold_workbench_plates_*.csv')
     bold_report        = _latest('bold_workbench_report_*.txt', results)
     print()
 
@@ -840,10 +829,10 @@ def main():
     sections += section_missing_specimens(missing_batch, missing_cats)
     sections += ["---", ""]
     sections += section_bold_flags(bold_report, bold_needs_resub, bold_flagged_no_alt,
-                                   bold_flagged_comp, bold_wb_plates)
+                                   bold_flagged_comp)
     sections += ["---", ""]
     sections += section_actions(plate_status, bold_needs_resub, bold_flagged_comp,
-                                bold_wb_plates, missing_cats, args.exclude_bge)
+                                missing_cats, args.exclude_bge)
 
     # Write
     with open(args.output, 'w') as f:
