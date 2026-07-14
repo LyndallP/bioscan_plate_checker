@@ -202,7 +202,12 @@ cp .env.example .env
 ## Routine run order
 
 ```bash
-# 1. Build portal plate summary from dump (~30 seconds)
+# 1. Build portal plate summary from dump (~30 seconds).
+#    Reads whatever TSV is currently pointed at by PORTAL_DUMP_TSV in
+#    config.py — this does NOT fetch fresh data from the portal. Pulling a
+#    new dump (`read_portal_dump.py --fetch`, ~2 hours, run in tmux) and then
+#    updating PORTAL_DUMP_TSV in config.py is a separate, manual, occasional
+#    step — see Setup step 3.
 python3 read_portal_dump.py
 
 # 2. Master plate status table: portal → mBRAVE → QC → BOLD
@@ -212,13 +217,14 @@ python3 plate_status_report.py --partner ALL
 python3 generate_pipeline_report.py
 
 # 4. Comprehensive plate-level QC summary (best result per specimen, all controls)
-python3 plate_summary_all.py --partner ALL
+python3 plate_summary_all.py --partner ALL --exclude-bge
 
 # 5. BOLD upload and BIN URI summary
 python3 bold_summary_from_portal.py --partner ALL
 
-# 5a. BOLDconnectR portal/BOLD sync check — queries the live BOLD API
-#     directly, so it runs every time now (previously occasional)
+# 5a. BOLDconnectR portal/BOLD sync check — queries the live BOLD API directly.
+#     Runs in parallel with the rest of the pipeline: nothing downstream reads
+#     its output, so there's no need to wait for the LSF job to finish.
 bsub < run_bold_check.sh
 
 # 6. Repeat analysis — plate level
@@ -233,7 +239,29 @@ python3 missing_specimen_analysis.py --partner ALL
 # 9. BOLD workbench analysis (when new flagged workbench files downloaded)
 python3 bold_workbench_analysis.py --partner ALL --rebuild-cache
 python3 bold_sequence_concordance.py --exclude-bge
+
+# 10. Data-integrity check: QC-FAILED specimens that still have a BOLD sequence.
+#     NOTE: sources the portal dump via a glob for sts_manifests_*.tsv in
+#     RESULTS_DIR, NOT PORTAL_DUMP_TSV from config.py — pass --input
+#     explicitly to be sure it matches the dump the rest of the pipeline used.
+python3 qc_bold_mismatch_portal.py --exclude-bge --input "$(python3 -c 'import config; print(config.PORTAL_DUMP_TSV)')"
+
+# 11. Batch-family sequence comparison: cross-batch conflicts/updates for
+#     repeat-sequenced specimens. NOTE: reads filtered_metadata_batch*.csv via
+#     a QC_DIR constant hardcoded in the script itself (currently matches
+#     config.py's QC_DIR, but isn't wired to it — update both if the QC
+#     folder changes).
+python3 batch_family_sequence_comparison.py
+
+# 12. Comprehensive Markdown summary report — run last, since it pulls in
+#     the most recently modified file of each type from the results dir.
+python3 generate_summary_report.py --exclude-bge
+
+# 13. Self-contained HTML version of the same report
+python3 generate_html_report.py --exclude-bge
 ```
+
+**Known data-source gaps (steps 10–11):** `qc_bold_mismatch_portal.py` and `batch_family_sequence_comparison.py` don't read from `config.py`'s `PORTAL_DUMP_TSV` / `QC_DIR` — see the notes above and their entries in [Script reference](#script-reference) below. Worth fixing at the source in a follow-up; documented here so they aren't silently trusted as fully in sync with the rest of the pipeline.
 
 ---
 
@@ -272,11 +300,14 @@ python3 utils.py   # run the batch structure audit
 ---
 
 ### `read_portal_dump.py`
-Reads the portal manifest TSV and builds a plate-level summary CSV. Run whenever a new dump is available.
+Reads the portal manifest TSV and builds a plate-level summary CSV.
+
+Without `--fetch`, this only rebuilds the summary from whatever file `config.py`'s `PORTAL_DUMP_TSV` currently points to — no network call, ~30 seconds, safe to run every routine cycle. `--fetch` queries the live ToL portal for a brand new dump (~2 hours — run in tmux) and is a separate, manual, occasional action; after fetching, update `PORTAL_DUMP_TSV` in `config.py` to point at the new dated file (see Setup step 3).
 
 ```bash
 python3 read_portal_dump.py
 python3 read_portal_dump.py --input /path/to/sts_manifests_20260427.tsv
+python3 read_portal_dump.py --fetch   # occasional — pulls a fresh dump from the portal
 ```
 
 ---
@@ -329,8 +360,10 @@ One row per plate showing the best QC result per specimen across all repeat sequ
 
 Produces two output files: PASS/ON_HOLD/FAIL summary, and categories 1–12 breakdown.
 
+The routine run always passes `--exclude-bge`, matching every other script in the pipeline (BGE plates are excluded from all other routine outputs). It defaults to off (`store_true`), same as everywhere else — don't flip that default, since `--exclude-bge` and `--partner BGEP` together always return zero rows (there's no override), and `--partner BGEP` is a supported use case below.
+
 ```bash
-python3 plate_summary_all.py --partner ALL
+python3 plate_summary_all.py --partner ALL --exclude-bge
 python3 plate_summary_all.py --partner BGEP
 python3 plate_summary_all.py --verbose
 ```
@@ -429,6 +462,49 @@ for the portal dump path instead of a second hardcoded copy.
 
 ```bash
 bsub < run_bold_check.sh
+```
+
+Runs in parallel with the rest of the routine run — nothing downstream reads `bold_check_specimens_*.csv` / `bold_check_plates_*.csv`, so there's no need to wait for the LSF job before continuing.
+
+---
+
+### `qc_bold_mismatch_portal.py`
+Data-integrity check: flags specimens with QC result FAILED that still have a sequence on BOLD (should never happen). Cross-references against the latest `plate_summary_all_ALL_*.csv` if present, so it's best run after `plate_summary_all.py` (step 4).
+
+**Data source caveat:** without `--input`, this looks for the most recently-named `sts_manifests_*.tsv` inside `RESULTS_DIR` — it does **not** read `config.py`'s `PORTAL_DUMP_TSV`. Those are only the same file if a dump has recently been fetched into `RESULTS_DIR` via `read_portal_dump.py --fetch`. Pass `--input` explicitly to guarantee it matches the dump the rest of the pipeline is using.
+
+```bash
+python3 qc_bold_mismatch_portal.py --exclude-bge --input "$(python3 -c 'import config; print(config.PORTAL_DUMP_TSV)')"
+```
+
+---
+
+### `batch_family_sequence_comparison.py`
+Compares sequences across batch family members (repeat sequencing runs of the same specimen) to identify which run was the BOLD upload source, whether a later run has a QC-passed sequence not yet on BOLD, and genuine sequence conflicts across runs.
+
+**Data source caveat:** reads `filtered_metadata_batch*.csv` via a `QC_DIR` constant hardcoded at the top of the script itself, not `config.py`'s `QC_DIR` — the two currently hold the same value but aren't wired together, so update both if the QC folder ever changes.
+
+```bash
+python3 batch_family_sequence_comparison.py
+python3 batch_family_sequence_comparison.py --family batch20   # one family only
+```
+
+---
+
+### `generate_summary_report.py`
+Comprehensive Markdown summary drawing from all pipeline output files (pipeline overview, missing plates, QC summary, repeat sequencing, missing specimens, BOLD quality flags, actions required). Finds the most recently modified file of each expected type in the results directory, so run it last, after every other routine step has produced fresh output for the cycle.
+
+```bash
+python3 generate_summary_report.py --exclude-bge
+```
+
+---
+
+### `generate_html_report.py`
+Self-contained HTML version of the same report as `generate_summary_report.py` — opens in any browser. Same "latest file by modification time" caveat: run last.
+
+```bash
+python3 generate_html_report.py --exclude-bge
 ```
 
 ---
